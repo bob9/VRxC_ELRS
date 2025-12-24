@@ -6,7 +6,9 @@ This enhancement adds per-pilot OSD element configuration with a visual preview 
 
 ### 1. Web-Based Configuration Interface
 - **URL**: `/elrs_osd_config`
-- **Access**: Via quick button in ELRS Settings panel ("Configure OSD per Pilot")
+- **Access**: Via quick button in ELRS Settings panel ("Open OSD Configuration Page")
+
+![OSD Configuration Menu Access](osd-config-menu-item.png)
 
 ![OSD Configuration Interface](osd-configuration.png)
 
