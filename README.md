@@ -235,6 +235,18 @@ Starts the backpack's WIFI mode. Used for over-the-air firmware updates.
 > It is a goal of this project to eventually move all the OSD settings in this section to be pilot configurable through the ExpressLRS VRx backpack's web user interface.
 > The current implementation is noted to be a work around until enough progress has been completed on the VRx backpack for individual pilot configuration.
 
+### Per-Pilot OSD Configuration
+
+The plugin supports per-pilot OSD configuration, allowing each pilot to have a custom OSD layout. This includes:
+- Individual element positioning (row, alignment, column)
+- Enable/disable specific elements per pilot
+- Display mode settings (static vs timed)
+- Display duration settings
+
+Access the configuration interface via the "Configure OSD per Pilot" button in the ELRS Backpack General Settings panel, or navigate directly to `/elrs_osd_config`.
+
+For detailed documentation on per-pilot configuration, see [OSD_CONFIG_README.md](custom_plugins/vrxc_elrs/OSD_CONFIG_README.md).
+
 ### Show Heat Name : CHECKBOX
 
 Shows the race's heat name to pilots when active
