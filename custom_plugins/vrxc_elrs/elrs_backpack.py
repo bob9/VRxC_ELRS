@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 
 import gevent
@@ -34,6 +35,77 @@ class ELRSBackpack(VRxController):
             return False
 
         return self._connection.connected
+
+    def get_pilot_osd_config(self, pilot_id: int) -> dict:
+        """
+        Get per-pilot OSD configuration. Returns empty dict if no custom config exists.
+
+        :param pilot_id: The pilot ID
+        :return: Dictionary of OSD configuration for the pilot
+        """
+        try:
+            config_json = self._rhapi.db.pilot_attribute_value(pilot_id, 'elrs_osd_config')
+            if config_json:
+                return json.loads(config_json)
+        except Exception as e:
+            logger.warning(f"Error loading pilot {pilot_id} OSD config: {e}")
+        return {}
+
+    def get_osd_setting(self, pilot_id: int, element_id: str, setting_key: str, default_key: str, default_value=None):
+        """
+        Get an OSD setting for a pilot, checking per-pilot config first, then falling back to global settings.
+
+        :param pilot_id: The pilot ID
+        :param element_id: The element identifier (e.g., 'heat_name', 'race_stage')
+        :param setting_key: The setting key within the element config ('row', 'alignment', 'custom_col')
+        :param default_key: The global setting key to use as fallback
+        :param default_value: Default value if neither per-pilot nor global setting exists
+        :return: The setting value
+        """
+        # Check per-pilot config first
+        pilot_config = self.get_pilot_osd_config(pilot_id)
+        if element_id in pilot_config and setting_key in pilot_config[element_id]:
+            return pilot_config[element_id][setting_key]
+
+        # Fall back to global setting
+        if default_key:
+            return self._rhapi.db.option(default_key, default_value)
+
+        return default_value
+
+    def get_pilot_behavior_setting(self, pilot_id: int, behavior_key: str, default_value="0"):
+        """
+        Get a behavior setting for a pilot, checking per-pilot config first, then falling back to global settings.
+
+        :param pilot_id: The pilot ID
+        :param behavior_key: The behavior setting key (e.g., '_round_num', '_gap_mode', '_results_mode')
+        :param default_value: Default value if neither per-pilot nor global setting exists
+        :return: The setting value as a string ("0" or "1")
+        """
+        # Check per-pilot config first
+        pilot_config = self.get_pilot_osd_config(pilot_id)
+        if behavior_key in pilot_config:
+            return "1" if pilot_config[behavior_key] else "0"
+
+        # Fall back to global setting
+        return self._rhapi.db.option(behavior_key, default_value)
+
+    def get_pilot_string_setting(self, pilot_id: int, setting_key: str, default_value=None):
+        """
+        Get a string-type setting for a pilot, checking per-pilot config first, then falling back to global settings.
+
+        :param pilot_id: The pilot ID
+        :param setting_key: The setting key (e.g., '_racestage_message', '_racestart_message')
+        :param default_value: Default value if neither per-pilot nor global setting exists
+        :return: The setting value as a string
+        """
+        # Check per-pilot config first
+        pilot_config = self.get_pilot_osd_config(pilot_id)
+        if setting_key in pilot_config:
+            return pilot_config[setting_key]
+
+        # Fall back to global setting
+        return self._rhapi.db.option(setting_key, default_value)
 
     def register_handlers(self, args) -> None:
         """
@@ -237,18 +309,60 @@ class ELRSBackpack(VRxController):
 
         return uid
 
-    def center_osd(self, len_: int) -> int:
+    def get_visible_text_length(self, text: str) -> int:
         """
-        Provides the column value needed to
-        center a string of the provided length
-        on the HDZero Goggles screen
+        Calculate the visible length of text excluding OSD color codes.
 
-        :param len_: The length of the string
-        :return:
+        In HDZero OSD, lowercase letters are color codes that don't display.
+        All visible text uses UPPERCASE letters, numbers, spaces, and punctuation.
+        Common color codes: w (white), x (reset/transparent), r (red), etc.
+
+        :param text: The text string with potential color codes
+        :return: The visible length of the text
         """
-        offset = len_ // 2
-        col = 50 // 2 - offset
-        return max(col, 0)
+        # Remove all lowercase letters (color codes) - only uppercase, numbers, spaces, and punctuation display
+        visible_text = ''.join(c for c in text if not c.islower())
+        return len(visible_text)
+
+    def calculate_osd_column(self, text: str, alignment: str, custom_col: int = 0) -> int:
+        """
+        Calculate the starting column for OSD text based on alignment preference.
+
+        HDZero OSD has 50 columns (0-49).
+
+        The custom_col parameter meaning varies by alignment type:
+        - left: custom_col is the LEFT edge position
+        - right: custom_col is the RIGHT edge position
+        - center: custom_col is the CENTER position
+
+        This function always returns the LEFT edge (starting column) where text should begin.
+
+        :param text: The text string to display (may include color codes)
+        :param alignment: Alignment type - "left", "center", or "right"
+        :param custom_col: Column position (meaning depends on alignment type)
+        :return: Starting column position (0-49)
+        """
+        # Calculate visible text length (excluding color codes)
+        text_length = self.get_visible_text_length(text)
+
+        if alignment == "left":
+            # custom_col is already the LEFT edge position
+            return max(0, min(custom_col, 49))
+        elif alignment == "right":
+            # custom_col is the RIGHT edge position
+            # Calculate starting position: right_edge - text_length + 1
+            col = custom_col - text_length + 1
+            return max(col, 0)
+        elif alignment == "center":
+            # custom_col is the CENTER position
+            # Calculate starting position: center - (text_length / 2)
+            offset = text_length // 2
+            col = custom_col - offset
+            return max(col, 0)
+        else:
+            # Fallback for any other alignment type (backward compatibility)
+            # Treat as left-aligned
+            return max(0, min(custom_col, 49))
 
     def send_msp(self, msp: MSPPacket) -> None:
         """
@@ -286,6 +400,35 @@ class ELRSBackpack(VRxController):
         payload.append(0x00)
         packet.set_payload(payload)
         self.send_msp(packet)
+
+    def send_osd_message_batch(self, uid: bytes, row: int, col: int, text: str) -> None:
+        """
+        Atomically sends a batch of packets to display an OSD message.
+
+        :param uid: Pilot UID to send to
+        :param row: OSD row
+        :param col: OSD column
+        :param text: Message text
+        """
+        with self._queue_lock:
+            self.set_send_uid(uid)
+            self.send_clear_osd()
+            self.send_osd_text(row, col, text)
+            self.send_display_osd()
+            self.reset_send_uid()
+
+    def send_osd_clear_batch(self, uid: bytes, row: int) -> None:
+        """
+        Atomically sends a batch of packets to clear an OSD row.
+
+        :param uid: Pilot UID to send to
+        :param row: OSD row to clear
+        """
+        with self._queue_lock:
+            self.set_send_uid(uid)
+            self.send_clear_osd_row(row)
+            self.send_display_osd()
+            self.reset_send_uid()
 
     def send_clear_osd(self) -> None:
         """
@@ -400,7 +543,7 @@ class ELRSBackpack(VRxController):
             text = "ROTORHAZARD"
             for row in range(18):
                 self.send_clear_osd()
-                start_col = self.center_osd(len(text))
+                start_col = self.calculate_osd_column(text, "center", 0)
                 self.send_osd_text(row, start_col, text)
                 self.send_display_osd()
 
@@ -415,6 +558,167 @@ class ELRSBackpack(VRxController):
             self._queue_lock.release()
 
         gevent.spawn(test)
+
+    def test_element(self, pilot_id: int, element_id: str) -> dict:
+        """
+        Generate a realistic test message for an OSD element using actual formatting logic.
+        Returns the formatted message(s), row(s), and col(s) that would be sent.
+
+        :param pilot_id: The pilot ID
+        :param element_id: The element identifier (e.g., 'heat_name', 'race_stage')
+        :return: Dictionary with message details
+        """
+        messages = []
+
+        try:
+            if element_id == 'heat_name':
+                # Get settings
+                row = int(self.get_osd_setting(pilot_id, 'heat_name', 'row', '_heatname_row', 2))
+                alignment = self.get_osd_setting(pilot_id, 'heat_name', 'alignment', '_heatname_align', 'center')
+                custom_col = int(self.get_osd_setting(pilot_id, 'heat_name', 'custom_col', '_heatname_custom_col', 0))
+                use_round_num = self.get_pilot_behavior_setting(pilot_id, '_round_num', "0") == "1"
+
+                # Generate mock message
+                if use_round_num:
+                    message = "x HEAT 1 | ROUND 2 w"
+                else:
+                    message = "x HEAT 1 w"
+
+                col = self.calculate_osd_column(message, alignment, custom_col)
+                messages.append({'row': row, 'col': col, 'message': message})
+
+            elif element_id == 'class_name':
+                row = int(self.get_osd_setting(pilot_id, 'class_name', 'row', '_classname_row', 1))
+                alignment = self.get_osd_setting(pilot_id, 'class_name', 'alignment', '_classname_align', 'center')
+                custom_col = int(self.get_osd_setting(pilot_id, 'class_name', 'custom_col', '_classname_custom_col', 0))
+
+                message = "x OPEN CLASS w"
+                col = self.calculate_osd_column(message, alignment, custom_col)
+                messages.append({'row': row, 'col': col, 'message': message})
+
+            elif element_id == 'event_name':
+                row = int(self.get_osd_setting(pilot_id, 'event_name', 'row', '_eventname_row', 0))
+                alignment = self.get_osd_setting(pilot_id, 'event_name', 'alignment', '_eventname_align', 'center')
+                custom_col = int(self.get_osd_setting(pilot_id, 'event_name', 'custom_col', '_eventname_custom_col', 0))
+
+                message = "x MULTIGP RACE 2025 w"
+                col = self.calculate_osd_column(message, alignment, custom_col)
+                messages.append({'row': row, 'col': col, 'message': message})
+
+            elif element_id == 'race_stage':
+                row = int(self.get_osd_setting(pilot_id, 'race_stage', 'row', '_status_row', 5))
+                alignment = self.get_osd_setting(pilot_id, 'race_stage', 'alignment', '_racestage_align', 'center')
+                custom_col = int(self.get_osd_setting(pilot_id, 'race_stage', 'custom_col', '_racestage_custom_col', 0))
+                message_text = self.get_pilot_string_setting(pilot_id, '_racestage_message', "w ARM NOW x")
+
+                col = self.calculate_osd_column(message_text, alignment, custom_col)
+                messages.append({'row': row, 'col': col, 'message': message_text})
+
+            elif element_id == 'race_start':
+                row = int(self.get_osd_setting(pilot_id, 'race_start', 'row', '_status_row', 5))
+                alignment = self.get_osd_setting(pilot_id, 'race_start', 'alignment', '_racestart_align', 'center')
+                custom_col = int(self.get_osd_setting(pilot_id, 'race_start', 'custom_col', '_racestart_custom_col', 0))
+                message_text = self.get_pilot_string_setting(pilot_id, '_racestart_message', "w   GO!   x")
+
+                col = self.calculate_osd_column(message_text, alignment, custom_col)
+                messages.append({'row': row, 'col': col, 'message': message_text})
+
+            elif element_id == 'race_finish':
+                row = int(self.get_osd_setting(pilot_id, 'race_finish', 'row', '_status_row', 5))
+                alignment = self.get_osd_setting(pilot_id, 'race_finish', 'alignment', '_racefinish_align', 'center')
+                custom_col = int(self.get_osd_setting(pilot_id, 'race_finish', 'custom_col', '_racefinish_custom_col', 0))
+                message_text = self.get_pilot_string_setting(pilot_id, '_racefinish_message', "w FINISH LAP! x")
+
+                col = self.calculate_osd_column(message_text, alignment, custom_col)
+                messages.append({'row': row, 'col': col, 'message': message_text})
+
+            elif element_id == 'race_stop':
+                row = int(self.get_osd_setting(pilot_id, 'race_stop', 'row', '_status_row', 5))
+                alignment = self.get_osd_setting(pilot_id, 'race_stop', 'alignment', '_racestop_align', 'center')
+                custom_col = int(self.get_osd_setting(pilot_id, 'race_stop', 'custom_col', '_racestop_custom_col', 0))
+                message_text = self.get_pilot_string_setting(pilot_id, '_racestop_message', "w  LAND NOW!  x")
+
+                col = self.calculate_osd_column(message_text, alignment, custom_col)
+                messages.append({'row': row, 'col': col, 'message': message_text})
+
+            elif element_id == 'current_lap':
+                row = int(self.get_osd_setting(pilot_id, 'current_lap', 'row', '_currentlap_row', 0))
+                alignment = self.get_osd_setting(pilot_id, 'current_lap', 'alignment', '_currentlap_align', 'left')
+                custom_col = int(self.get_osd_setting(pilot_id, 'current_lap', 'custom_col', '_currentlap_custom_col', 0))
+
+                if self.get_pilot_behavior_setting(pilot_id, '_position_mode', "0") == "1":
+                    message = "POSN: 2ND | LAP: 4"
+                else:
+                    message = "LAP: 4"
+
+                col = self.calculate_osd_column(message, alignment, custom_col)
+                messages.append({'row': row, 'col': col, 'message': message})
+
+            elif element_id == 'lap_results':
+                row = int(self.get_osd_setting(pilot_id, 'lap_results', 'row', '_lapresults_row', 15))
+                alignment = self.get_osd_setting(pilot_id, 'lap_results', 'alignment', '_lapresults_align', 'center')
+                custom_col = int(self.get_osd_setting(pilot_id, 'lap_results', 'custom_col', '_lapresults_custom_col', 0))
+
+                # Generate mock lap result message
+                message = "x 0:42.5 | 3:45.2 w"
+
+                col = self.calculate_osd_column(message, alignment, custom_col)
+                messages.append({'row': row, 'col': col, 'message': message})
+
+            elif element_id == 'announcement':
+                row = int(self.get_osd_setting(pilot_id, 'announcement', 'row', '_announcement_row', 3))
+                alignment = self.get_osd_setting(pilot_id, 'announcement', 'alignment', '_announcement_align', 'center')
+                custom_col = int(self.get_osd_setting(pilot_id, 'announcement', 'custom_col', '_announcement_custom_col', 0))
+
+                message = "x NEXT RACE IN 5 MINUTES w"
+
+                col = self.calculate_osd_column(message, alignment, custom_col)
+                messages.append({'row': row, 'col': col, 'message': message})
+
+            elif element_id == 'leader':
+                row = int(self.get_osd_setting(pilot_id, 'leader', 'row', '_status_row', 5))
+                alignment = self.get_osd_setting(pilot_id, 'leader', 'alignment', '_leader_align', 'center')
+                custom_col = int(self.get_osd_setting(pilot_id, 'leader', 'custom_col', '_leader_custom_col', 0))
+                leader_message = self.get_pilot_string_setting(pilot_id, '_leader_message', 'RACE LEADER')
+
+                message = f"x {leader_message} | 0:42.1 w"
+
+                col = self.calculate_osd_column(message, alignment, custom_col)
+                messages.append({'row': row, 'col': col, 'message': message})
+
+            elif element_id == 'results':
+                base_row = int(self.get_osd_setting(pilot_id, 'results', 'row', '_results_row', 13))
+                alignment = self.get_osd_setting(pilot_id, 'results', 'alignment', '_placement_align', 'center')
+                custom_col = int(self.get_osd_setting(pilot_id, 'results', 'custom_col', '_placement_custom_col', 0))
+
+                # Generate two-line results
+                message1 = "PLACEMENT: 2"
+                col1 = self.calculate_osd_column(message1, alignment, custom_col)
+                messages.append({'row': base_row, 'col': col1, 'message': message1})
+
+                message2 = "TOTAL TIME: 3:45.2"
+                col2 = self.calculate_osd_column(message2, alignment, custom_col)
+                messages.append({'row': base_row + 1, 'col': col2, 'message': message2})
+
+            elif element_id == 'lap_times':
+                base_row = int(self.get_osd_setting(pilot_id, 'lap_times', 'row', '_laptimes_row', 14))
+                alignment = self.get_osd_setting(pilot_id, 'lap_times', 'alignment', '_laptimes_align', 'center')
+                custom_col = int(self.get_osd_setting(pilot_id, 'lap_times', 'custom_col', '_laptimes_custom_col', 0))
+
+                # Generate multiple lap time lines
+                mock_lap_times = ['L1: 0:45.2', 'L2: 0:46.1', 'L3: 0:44.5']
+                for i, lap_time in enumerate(mock_lap_times):
+                    col = self.calculate_osd_column(lap_time, alignment, custom_col)
+                    messages.append({'row': base_row + i, 'col': col, 'message': lap_time})
+
+            else:
+                return {'success': False, 'error': f'Unknown element ID: {element_id}'}
+
+            return {'success': True, 'messages': messages, 'element_id': element_id}
+
+        except Exception as e:
+            logger.error(f"Error generating test for element {element_id}: {e}")
+            return {'success': False, 'error': str(e)}
 
     #
     # VRxC Event Triggers
@@ -466,59 +770,115 @@ class ELRSBackpack(VRxController):
 
         # Generate heat message
         heat_name_row = self._rhapi.db.option("_heatname_row")
+        heat_align = self._rhapi.db.option("_heatname_align", "center")
+        heat_custom_col = self._rhapi.db.option("_heatname_custom_col", 0)
         if all([use_heat_name, use_round_num, heat_name, round_num]):
             round_trans = self._rhapi.__("Round")
             heat_message = (
                 f"x {heat_name.upper()} | {round_trans.upper()} {round_num} w"
             )
-            heat_start_col = self.center_osd(len(heat_message))
+            heat_start_col = self.calculate_osd_column(heat_message, heat_align, heat_custom_col)
             heat_message_parms = (heat_name_row, heat_start_col, heat_message)
         elif use_heat_name and heat_name:
             heat_message = f"x {heat_name.upper()} w"
-            heat_start_col = self.center_osd(len(heat_message))
+            heat_start_col = self.calculate_osd_column(heat_message, heat_align, heat_custom_col)
             heat_message_parms = (heat_name_row, heat_start_col, heat_message)
         else:
             heat_message_parms = None
 
         # Generate class message
         class_name_row = self._rhapi.db.option("_classname_row")
+        class_align = self._rhapi.db.option("_classname_align", "center")
+        class_custom_col = self._rhapi.db.option("_classname_custom_col", 0)
         if use_class_name and class_name:
             class_message = f"x {class_name.upper()} w"
-            class_start_col = self.center_osd(len(class_message))
+            class_start_col = self.calculate_osd_column(class_message, class_align, class_custom_col)
             class_message_parms = (class_name_row, class_start_col, class_message)
 
         # Generate event message
         event_name_row = self._rhapi.db.option("_eventname_row")
         event_name = self._rhapi.db.option("eventName")
+        event_align = self._rhapi.db.option("_eventname_align", "center")
+        event_custom_col = self._rhapi.db.option("_eventname_custom_col", 0)
         if use_event_name and event_name:
             event_name = self._rhapi.db.option("eventName")
-            event_message = heat_message = f"x {event_name.upper()} w"
-            event_start_col = self.center_osd(len(heat_message))
+            event_message = f"x {event_name.upper()} w"
+            event_start_col = self.calculate_osd_column(event_message, event_align, event_custom_col)
             event_message_parms = (event_name_row, event_start_col, event_message)
 
-        start_col = self.center_osd(len(self._rhapi.db.option("_racestage_message")))
+        stage_message_text = self._rhapi.db.option("_racestage_message")
+        stage_align = self._rhapi.db.option("_racestage_align", "center")
+        stage_custom_col = self._rhapi.db.option("_racestage_custom_col", 0)
+        start_col = self.calculate_osd_column(stage_message_text, stage_align, stage_custom_col)
         stage_mesage = (
             self._rhapi.db.option("_status_row"),
             start_col,
-            self._rhapi.db.option("_racestage_message"),
+            stage_message_text,
         )
 
         # Send stage message to all pilots
         def arm(pilot_id):
             uid = self.get_pilot_uid(pilot_id)
+
+            # Get per-pilot settings for this pilot
+            # Heat name
+            pilot_heat_row = self.get_osd_setting(pilot_id, 'heat_name', 'row', '_heatname_row', heat_name_row)
+            pilot_heat_align = self.get_osd_setting(pilot_id, 'heat_name', 'alignment', '_heatname_align', heat_align)
+            pilot_heat_col = self.get_osd_setting(pilot_id, 'heat_name', 'custom_col', '_heatname_custom_col', heat_custom_col)
+
+            # Class name
+            pilot_class_row = self.get_osd_setting(pilot_id, 'class_name', 'row', '_classname_row', class_name_row)
+            pilot_class_align = self.get_osd_setting(pilot_id, 'class_name', 'alignment', '_classname_align', class_align)
+            pilot_class_col = self.get_osd_setting(pilot_id, 'class_name', 'custom_col', '_classname_custom_col', class_custom_col)
+
+            # Event name
+            pilot_event_row = self.get_osd_setting(pilot_id, 'event_name', 'row', '_eventname_row', event_name_row)
+            pilot_event_align = self.get_osd_setting(pilot_id, 'event_name', 'alignment', '_eventname_align', event_align)
+            pilot_event_col = self.get_osd_setting(pilot_id, 'event_name', 'custom_col', '_eventname_custom_col', event_custom_col)
+
+            # Stage message
+            pilot_status_row = self.get_osd_setting(pilot_id, 'race_stage', 'row', '_status_row', self._rhapi.db.option("_status_row"))
+            pilot_stage_align = self.get_osd_setting(pilot_id, 'race_stage', 'alignment', '_racestage_align', stage_align)
+            pilot_stage_col = self.get_osd_setting(pilot_id, 'race_stage', 'custom_col', '_racestage_custom_col', stage_custom_col)
+
+            # Recalculate positions with pilot-specific settings
+            pilot_stage_start_col = self.calculate_osd_column(stage_message_text, pilot_stage_align, pilot_stage_col)
+            pilot_stage_message = (pilot_status_row, pilot_stage_start_col, stage_message_text)
+
+            pilot_heat_message_parms = None
+            if use_heat_name and heat_name:
+                if all([use_round_num, heat_name, round_num]):
+                    round_trans = self._rhapi.__("Round")
+                    heat_message = f"x {heat_name.upper()} | {round_trans.upper()} {round_num} w"
+                else:
+                    heat_message = f"x {heat_name.upper()} w"
+                pilot_heat_start_col = self.calculate_osd_column(heat_message, pilot_heat_align, pilot_heat_col)
+                pilot_heat_message_parms = (pilot_heat_row, pilot_heat_start_col, heat_message)
+
+            pilot_class_message_parms = None
+            if use_class_name and class_name:
+                class_message = f"x {class_name.upper()} w"
+                pilot_class_start_col = self.calculate_osd_column(class_message, pilot_class_align, pilot_class_col)
+                pilot_class_message_parms = (pilot_class_row, pilot_class_start_col, class_message)
+
+            pilot_event_message_parms = None
+            if use_event_name and event_name:
+                event_message = f"x {event_name.upper()} w"
+                pilot_event_start_col = self.calculate_osd_column(event_message, pilot_event_align, pilot_event_col)
+                pilot_event_message_parms = (pilot_event_row, pilot_event_start_col, event_message)
+
             with self._queue_lock:
                 self.set_send_uid(uid)
                 self.send_clear_osd()
 
-                # Send messages to backpack
-                self.send_osd_text(*stage_mesage)
-                if use_heat_name and heat_name:
-                    assert heat_message_parms is not None
-                    self.send_osd_text(*heat_message_parms)
-                if use_class_name and class_name:
-                    self.send_osd_text(*class_message_parms)
-                if use_event_name and event_name:
-                    self.send_osd_text(*event_message_parms)
+                # Send messages to backpack with per-pilot positions
+                self.send_osd_text(*pilot_stage_message)
+                if pilot_heat_message_parms:
+                    self.send_osd_text(*pilot_heat_message_parms)
+                if pilot_class_message_parms:
+                    self.send_osd_text(*pilot_class_message_parms)
+                if pilot_event_message_parms:
+                    self.send_osd_text(*pilot_event_message_parms)
 
                 self.send_display_osd()
                 self.reset_send_uid()
@@ -540,32 +900,34 @@ class ELRSBackpack(VRxController):
 
         def start(pilot_id):
             uid = self.get_pilot_uid(pilot_id)
-            start_col = self.center_osd(
-                len(self._rhapi.db.option("_racestart_message"))
-            )
 
-            self._queue_lock.acquire()
-            self.set_send_uid(uid)
+            # Get per-pilot settings
+            status_row = self.get_osd_setting(pilot_id, 'race_start', 'row', '_status_row', self._rhapi.db.option("_status_row"))
+            start_message_text = self._rhapi.db.option("_racestart_message")
+            start_align = self.get_osd_setting(pilot_id, 'race_start', 'alignment', '_racestart_align', "center")
+            start_custom_col = self.get_osd_setting(pilot_id, 'race_start', 'custom_col', '_racestart_custom_col', 0)
+            start_col = self.calculate_osd_column(start_message_text, start_align, start_custom_col)
 
-            self.send_clear_osd()
-
-            self.send_osd_text(
-                self._rhapi.db.option("_status_row"),
+            # Send GO message atomically (lock released immediately after)
+            self.send_osd_message_batch(
+                uid,
+                status_row,
                 start_col,
-                self._rhapi.db.option("_racestart_message"),
+                start_message_text
             )
-            self.send_display_osd()
-            self.reset_send_uid()
-            self._queue_lock.release()
 
-            gevent.sleep(self._rhapi.db.option("_racestart_uptime") * 1e-1)
+            # Spawn separate greenlet for delayed clearing
+            def delayed_clear():
+                # Wait for configured uptime
+                gevent.sleep(self._rhapi.db.option("_racestart_uptime") * 1e-1)
 
-            self._queue_lock.acquire()
-            self.set_send_uid(uid)
-            self.send_clear_osd_row(self._rhapi.db.option("_status_row"))
-            self.send_display_osd()
-            self.reset_send_uid()
-            self._queue_lock.release()
+                # Add transmission buffer (100ms) to ensure display packets fully transmit
+                gevent.sleep(0.1)
+
+                # Clear the message atomically
+                self.send_osd_clear_batch(uid, status_row)
+
+            gevent.spawn(delayed_clear)
 
         seat_pilots = self._rhapi.race.pilots
         for seat in seat_pilots:
@@ -584,30 +946,33 @@ class ELRSBackpack(VRxController):
 
         def finish(pilot_id):
             uid = self.get_pilot_uid(pilot_id)
-            start_col = self.center_osd(
-                len(self._rhapi.db.option("_racefinish_message"))
-            )
 
-            self._queue_lock.acquire()
-            self.set_send_uid(uid)
-            self.send_clear_osd_row(self._rhapi.db.option("_status_row"))
-            self.send_osd_text(
-                self._rhapi.db.option("_status_row"),
-                start_col,
-                self._rhapi.db.option("_racefinish_message"),
-            )
-            self.send_display_osd()
-            self.reset_send_uid()
-            self._queue_lock.release()
+            # Get per-pilot settings
+            status_row = self.get_osd_setting(pilot_id, 'race_finish', 'row', '_status_row', self._rhapi.db.option("_status_row"))
+            finish_message_text = self._rhapi.db.option("_racefinish_message")
+            finish_align = self.get_osd_setting(pilot_id, 'race_finish', 'alignment', '_racefinish_align', "center")
+            finish_custom_col = self.get_osd_setting(pilot_id, 'race_finish', 'custom_col', '_racefinish_custom_col', 0)
+            start_col = self.calculate_osd_column(finish_message_text, finish_align, finish_custom_col)
 
-            gevent.sleep(self._rhapi.db.option("_finish_uptime") * 1e-1)
+            # Send FINISH message atomically
+            with self._queue_lock:
+                self.set_send_uid(uid)
+                self.send_clear_osd_row(status_row)
+                self.send_osd_text(
+                    status_row,
+                    start_col,
+                    finish_message_text
+                )
+                self.send_display_osd()
+                self.reset_send_uid()
 
-            self._queue_lock.acquire()
-            self.set_send_uid(uid)
-            self.send_clear_osd_row(self._rhapi.db.option("_status_row"))
-            self.send_display_osd()
-            self.reset_send_uid()
-            self._queue_lock.release()
+            # Delayed clear in separate greenlet
+            def delayed_clear():
+                gevent.sleep(self._rhapi.db.option("_finish_uptime") * 1e-1)
+                gevent.sleep(0.1)  # Transmission buffer
+                self.send_osd_clear_batch(uid, status_row)
+
+            gevent.spawn(delayed_clear)
 
         seat_pilots = self._rhapi.race.pilots
         seats_finished = self._rhapi.race.seats_finished
@@ -627,20 +992,57 @@ class ELRSBackpack(VRxController):
         if not self._backpack_connected:
             return
 
-        def land(pilot_id):
+        def show_lap_times(pilot_id, seat):
             uid = self.get_pilot_uid(pilot_id)
-            start_col = self.center_osd(len(self._rhapi.db.option("_racestop_message")))
 
-            self._queue_lock.acquire()
-            self.set_send_uid(uid)
-            self.send_osd_text(
-                self._rhapi.db.option("_status_row"),
-                start_col,
-                self._rhapi.db.option("_racestop_message"),
-            )
-            self.send_display_osd()
-            self.reset_send_uid()
-            self._queue_lock.release()
+            # Get lap data for this pilot using laps_raw API
+            all_laps = self._rhapi.race.laps_raw
+            laps = all_laps[seat] if seat < len(all_laps) else []
+
+            # Prepare lap time messages (up to 10 laps to fit on screen)
+            lap_messages = []
+            max_laps = min(len(laps), 10)  # Limit to 10 laps to avoid overflow
+
+            for i in range(max_laps):
+                lap_time = self._rhapi.utils.format_split_time_to_str(
+                    laps[i]["lap_time"], "{m}:{s}.{d}"
+                )
+                lap_messages.append((i, f"L{i + 1}: {lap_time}"))
+
+            # If no laps, show a message
+            if not lap_messages:
+                lap_messages.append((0, "NO LAPS RECORDED"))
+
+            # Get per-pilot settings for race_stop message
+            status_row = self.get_osd_setting(pilot_id, 'race_stop', 'row', '_status_row', self._rhapi.db.option("_status_row"))
+            laptimes_align = self.get_osd_setting(pilot_id, 'race_stop', 'alignment', '_laptimes_align', "center")
+            laptimes_custom_col = self.get_osd_setting(pilot_id, 'race_stop', 'custom_col', '_laptimes_custom_col', 0)
+
+            with self._queue_lock:
+                self.set_send_uid(uid)
+                self.send_clear_osd()
+
+                # Display each lap on its own row starting from status_row
+                for idx, message in lap_messages:
+                    start_col = self.calculate_osd_column(message, laptimes_align, laptimes_custom_col)
+                    self.send_osd_text(status_row + idx, start_col, message)
+
+                self.send_display_osd()
+                self.reset_send_uid()
+
+            # Delayed clear in separate greenlet (10 seconds + 100ms buffer)
+            def delayed_clear():
+                gevent.sleep(10.0)  # 10 seconds display time
+                gevent.sleep(0.1)   # Transmission buffer
+
+                # Clear all rows that were used
+                with self._queue_lock:
+                    self.set_send_uid(uid)
+                    self.send_clear_osd()
+                    self.send_display_osd()
+                    self.reset_send_uid()
+
+            gevent.spawn(delayed_clear)
 
         seat_pilots = self._rhapi.race.pilots
         seats_finished = self._rhapi.race.seats_finished
@@ -654,7 +1056,7 @@ class ELRSBackpack(VRxController):
                 == "1"
             ):
                 if not seats_finished[seat]:
-                    gevent.spawn(land, seat_pilots[seat])
+                    gevent.spawn(show_lap_times, seat_pilots[seat], seat)
 
     def onRaceLapRecorded(self, args: dict) -> None:
         if not self._backpack_connected:
@@ -667,16 +1069,19 @@ class ELRSBackpack(VRxController):
                 message = f"LAP: {result['laps'] + 1}"
             else:
                 message = f"POSN: {str(result['position']).upper()} | LAP: {result['laps'] + 1}"
-            start_col = self.center_osd(len(message))
+
+            # Get per-pilot settings
+            currentlap_row = self.get_osd_setting(pilot_id, 'current_lap', 'row', '_currentlap_row', self._rhapi.db.option("_currentlap_row"))
+            currentlap_align = self.get_osd_setting(pilot_id, 'current_lap', 'alignment', '_currentlap_align', "center")
+            currentlap_custom_col = self.get_osd_setting(pilot_id, 'current_lap', 'custom_col', '_currentlap_custom_col', 0)
+            start_col = self.calculate_osd_column(message, currentlap_align, currentlap_custom_col)
 
             uid = self.get_pilot_uid(pilot_id)
             self._queue_lock.acquire()
             self.set_send_uid(uid)
-            self.send_clear_osd_row(self._rhapi.db.option("_currentlap_row"))
+            self.send_clear_osd_row(currentlap_row)
 
-            self.send_osd_text(
-                self._rhapi.db.option("_currentlap_row"), start_col, message
-            )
+            self.send_osd_text(currentlap_row, start_col, message)
             self.send_display_osd()
             self.reset_send_uid()
             self._queue_lock.release()
@@ -684,8 +1089,13 @@ class ELRSBackpack(VRxController):
         def lap_results(result, gap_info):
             pilot_id = result["pilot_id"]
 
+            # Get per-pilot settings
+            lapresults_row = self.get_osd_setting(pilot_id, 'lap_results', 'row', '_lapresults_row', self._rhapi.db.option("_lapresults_row"))
+            lapresults_align = self.get_osd_setting(pilot_id, 'lap_results', 'alignment', '_lapresults_align', "center")
+            lapresults_custom_col = self.get_osd_setting(pilot_id, 'lap_results', 'custom_col', '_lapresults_custom_col', 0)
+
             message = ""
-            if self._rhapi.db.option("_gap_mode") != "1":
+            if self.get_pilot_behavior_setting(pilot_id, "_gap_mode") != "1":
                 if gap_info.race.win_condition == WinCondition.FASTEST_CONSECUTIVE:
                     formatted_time1 = self._rhapi.utils.format_split_time_to_str(
                         gap_info.current.last_lap_time, "{m}:{s}.{d}"
@@ -755,26 +1165,24 @@ class ELRSBackpack(VRxController):
                     )
                     message = f"x {self._rhapi.db.option('_leader_message')} | {formatted_time} w"
 
-            start_col = self.center_osd(len(message))
+            start_col = self.calculate_osd_column(message, lapresults_align, lapresults_custom_col)
 
             uid = self.get_pilot_uid(pilot_id)
-            self._queue_lock.acquire()
-            self.set_send_uid(uid)
-            self.send_osd_text(
-                self._rhapi.db.option("_lapresults_row"), start_col, message
-            )
-            self.send_display_osd()
-            self.reset_send_uid()
-            self._queue_lock.release()
 
-            gevent.sleep(self._rhapi.db.option("_results_uptime") * 1e-1)
+            # Send lap results atomically
+            with self._queue_lock:
+                self.set_send_uid(uid)
+                self.send_osd_text(lapresults_row, start_col, message)
+                self.send_display_osd()
+                self.reset_send_uid()
 
-            self._queue_lock.acquire()
-            self.set_send_uid(uid)
-            self.send_clear_osd_row(self._rhapi.db.option("_lapresults_row"))
-            self.send_display_osd()
-            self.reset_send_uid()
-            self._queue_lock.release()
+            # Delayed clear in separate greenlet
+            def delayed_clear():
+                gevent.sleep(self._rhapi.db.option("_results_uptime") * 1e-1)
+                gevent.sleep(0.1)  # Transmission buffer
+                self.send_osd_clear_batch(uid, lapresults_row)
+
+            gevent.spawn(delayed_clear)
 
         seats_finished = self._rhapi.race.seats_finished
         pilots_completion = {}
@@ -831,52 +1239,89 @@ class ELRSBackpack(VRxController):
 
         def done(result, win_condition):
             pilot_id = result["pilot_id"]
-            start_col = self.center_osd(
-                len(self._rhapi.db.option("_pilotdone_message"))
-            )
-            results_row1 = self._rhapi.db.option("_results_row")
+
+            # Get per-pilot settings for pilot done message
+            pilotdone_message_text = self._rhapi.db.option("_pilotdone_message")
+            status_row = self.get_osd_setting(pilot_id, 'pilot_done', 'row', '_status_row', self._rhapi.db.option("_status_row"))
+            pilotdone_align = self.get_osd_setting(pilot_id, 'pilot_done', 'alignment', '_pilotdone_align', "center")
+            pilotdone_custom_col = self.get_osd_setting(pilot_id, 'pilot_done', 'custom_col', '_pilotdone_custom_col', 0)
+            start_col = self.calculate_osd_column(pilotdone_message_text, pilotdone_align, pilotdone_custom_col)
+
+            # Get per-pilot settings for results display
+            results_row1 = self.get_osd_setting(pilot_id, 'results', 'row', '_results_row', self._rhapi.db.option("_results_row"))
             results_row2 = results_row1 + 1
 
+            # Get per-pilot setting for current lap row (to clear it)
+            currentlap_row = self.get_osd_setting(pilot_id, 'current_lap', 'row', '_currentlap_row', self._rhapi.db.option("_currentlap_row"))
+
             uid = self.get_pilot_uid(pilot_id)
-            self._queue_lock.acquire()
-            self.set_send_uid(uid)
-            self.send_clear_osd_row(self._rhapi.db.option("_currentlap_row"))
-            self.send_clear_osd_row(self._rhapi.db.option("_status_row"))
-            self.send_osd_text(
-                self._rhapi.db.option("_status_row"),
-                start_col,
-                self._rhapi.db.option("_pilotdone_message"),
-            )
 
-            if self._rhapi.db.option("_results_mode") == "1":
-                placement_message = f"PLACEMENT: {result['position']}"
-                place_col = self.center_osd(len(placement_message))
-                self.send_osd_text(results_row1, place_col, placement_message)
+            # Send pilot done message atomically
+            with self._queue_lock:
+                self.set_send_uid(uid)
+                self.send_clear_osd_row(currentlap_row)
+                self.send_clear_osd_row(status_row)
+                self.send_osd_text(
+                    status_row,
+                    start_col,
+                    pilotdone_message_text
+                )
 
-                if win_condition == WinCondition.FASTEST_CONSECUTIVE:
-                    win_message = f"FASTEST {result['consecutives_base']} CONSEC: {result['consecutives']}"
-                elif win_condition == WinCondition.FASTEST_LAP:
-                    win_message = f"FASTEST LAP: {result['fastest_lap']}"
-                elif win_condition == WinCondition.FIRST_TO_LAP_X:
-                    win_message = f"TOTAL TIME: {result['total_time']}"
-                else:
-                    win_message = f"LAPS COMPLETED: {result['laps']}"
+                if self.get_pilot_behavior_setting(pilot_id, "_results_mode") == "1":
+                    # Get per-pilot settings for placement and win message
+                    placement_align = self.get_osd_setting(pilot_id, 'results', 'alignment', '_placement_align', "center")
+                    placement_custom_col = self.get_osd_setting(pilot_id, 'results', 'custom_col', '_placement_custom_col', 0)
+                    placement_message = f"PLACEMENT: {result['position']}"
+                    place_col = self.calculate_osd_column(placement_message, placement_align, placement_custom_col)
+                    self.send_osd_text(results_row1, place_col, placement_message)
 
-                win_col = self.center_osd(len(win_message))
-                self.send_osd_text(results_row2, win_col, win_message)
+                    winmessage_align = self.get_osd_setting(pilot_id, 'results', 'alignment', '_winmessage_align', "center")
+                    winmessage_custom_col = self.get_osd_setting(pilot_id, 'results', 'custom_col', '_winmessage_custom_col', 0)
 
-            self.send_display_osd()
-            self.reset_send_uid()
-            self._queue_lock.release()
+                    if win_condition == WinCondition.FASTEST_CONSECUTIVE:
+                        win_message = f"FASTEST {result['consecutives_base']} CONSEC: {result['consecutives']}"
+                    elif win_condition == WinCondition.FASTEST_LAP:
+                        win_message = f"FASTEST LAP: {result['fastest_lap']}"
+                    elif win_condition == WinCondition.FIRST_TO_LAP_X:
+                        win_message = f"TOTAL TIME: {result['total_time']}"
+                    else:
+                        win_message = f"LAPS COMPLETED: {result['laps']}"
 
-            gevent.sleep(self._rhapi.db.option("_finish_uptime") * 1e-1)
+                    win_col = self.calculate_osd_column(win_message, winmessage_align, winmessage_custom_col)
+                    self.send_osd_text(results_row2, win_col, win_message)
 
-            self._queue_lock.acquire()
-            self.set_send_uid(uid)
-            self.send_clear_osd_row(self._rhapi.db.option("_status_row"))
-            self.send_display_osd()
-            self.reset_send_uid()
-            self._queue_lock.release()
+                # Display lap times if enabled (check per-pilot setting)
+                show_laptimes = self.get_osd_setting(pilot_id, 'lap_times', 'enabled', '_show_laptimes', True)
+                if show_laptimes:
+                    # Get lap data for this pilot using results
+                    all_laps = result.get('laps_list', [])
+
+                    # Get per-pilot settings for lap times
+                    laptimes_row = self.get_osd_setting(pilot_id, 'lap_times', 'row', '_laptimes_row', self._rhapi.db.option("_laptimes_row", 14))
+                    laptimes_align = self.get_osd_setting(pilot_id, 'lap_times', 'alignment', '_laptimes_align', "center")
+                    laptimes_custom_col = self.get_osd_setting(pilot_id, 'lap_times', 'custom_col', '_laptimes_custom_col', 0)
+
+                    # Limit to first 5 laps to fit on screen
+                    max_laps = min(len(all_laps), 5)
+
+                    for i in range(max_laps):
+                        lap_time = self._rhapi.utils.format_split_time_to_str(
+                            all_laps[i]["lap_time"], "{m}:{s}.{d}"
+                        )
+                        message = f"L{i + 1}: {lap_time}"
+                        start_col = self.calculate_osd_column(message, laptimes_align, laptimes_custom_col)
+                        self.send_osd_text(laptimes_row + i, start_col, message)
+
+                self.send_display_osd()
+                self.reset_send_uid()
+
+            # Delayed clear in separate greenlet
+            def delayed_clear():
+                gevent.sleep(self._rhapi.db.option("_finish_uptime") * 1e-1)
+                gevent.sleep(0.1)  # Transmission buffer
+                self.send_osd_clear_batch(uid, status_row)
+
+            gevent.spawn(delayed_clear)
 
         results = args["results"]
         leaderboard = results[results["meta"]["primary_leaderboard"]]
@@ -927,26 +1372,33 @@ class ELRSBackpack(VRxController):
 
         def notify(pilot):
             uid = self.get_pilot_uid(pilot)
-            start_col = self.center_osd(len(args["message"]))
-            self._queue_lock.acquire()
-            self.set_send_uid(uid)
-            self.send_osd_text(
-                self._rhapi.db.option("_announcement_row"),
-                start_col,
-                f"x {str.upper(args['message'])} w",
-            )
-            self.send_display_osd()
-            self.reset_send_uid()
-            self._queue_lock.release()
 
-            gevent.sleep(self._rhapi.db.option("_announcement_uptime") * 1e-1)
+            # Get per-pilot settings for announcement
+            announcement_row = self.get_osd_setting(pilot, 'announcement', 'row', '_announcement_row', self._rhapi.db.option("_announcement_row"))
+            announcement_align = self.get_osd_setting(pilot, 'announcement', 'alignment', '_announcement_align', "center")
+            announcement_custom_col = self.get_osd_setting(pilot, 'announcement', 'custom_col', '_announcement_custom_col', 0)
 
-            self._queue_lock.acquire()
-            self.set_send_uid(uid)
-            self.send_clear_osd_row(self._rhapi.db.option("_announcement_row"))
-            self.send_display_osd()
-            self.reset_send_uid()
-            self._queue_lock.release()
+            decorated_message = f"x {str.upper(args['message'])} w"
+            start_col = self.calculate_osd_column(decorated_message, announcement_align, announcement_custom_col)
+
+            # Send announcement atomically
+            with self._queue_lock:
+                self.set_send_uid(uid)
+                self.send_osd_text(
+                    announcement_row,
+                    start_col,
+                    decorated_message
+                )
+                self.send_display_osd()
+                self.reset_send_uid()
+
+            # Delayed clear in separate greenlet
+            def delayed_clear():
+                gevent.sleep(self._rhapi.db.option("_announcement_uptime") * 1e-1)
+                gevent.sleep(0.1)  # Transmission buffer
+                self.send_osd_clear_batch(uid, announcement_row)
+
+            gevent.spawn(delayed_clear)
 
         seat_pilots = self._rhapi.race.pilots
         for seat in seat_pilots:
