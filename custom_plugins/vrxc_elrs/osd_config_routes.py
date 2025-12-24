@@ -3,6 +3,8 @@ Flask blueprint for ELRS OSD configuration interface
 """
 import json
 import logging
+
+import gevent
 from flask import Blueprint, render_template, request, jsonify
 
 logger = logging.getLogger(__name__)
@@ -496,7 +498,42 @@ def initialize_routes(rhapi, controller):
                 controller.send_display_osd()
                 controller.reset_send_uid()
 
-            logger.info(f"Sent test for element '{element_id}' to pilot {pilot_id}: {messages}")
+            # Load pilot's OSD config
+            config_json = rhapi.db.pilot_attribute_value(pilot_id, 'elrs_osd_config')
+            pilot_config = json.loads(config_json) if config_json else {}
+
+            # Load global config
+            global_config_json = rhapi.db.option('elrs_global_osd_config')
+            global_config = json.loads(global_config_json) if global_config_json else {}
+
+            # Get element config: pilot config first, then global config
+            if pilot_config and element_id in pilot_config:
+                element_config = pilot_config.get(element_id, {})
+            else:
+                element_config = global_config.get(element_id, {})
+
+            # Get display mode and duration from config
+            is_timed = element_config.get('is_timed', False)
+            uptime_deciseconds = int(element_config.get('uptime', 0))
+
+            # Spawn delayed clear if timed mode and uptime > 0
+            if is_timed and uptime_deciseconds > 0:
+                def delayed_clear():
+                    # Wait for configured uptime
+                    gevent.sleep(uptime_deciseconds * 1e-1)
+                    # Add transmission buffer (100ms) to ensure display packets fully transmit
+                    gevent.sleep(0.1)
+                    # Clear the message atomically
+                    with controller._queue_lock:
+                        controller.set_send_uid(uid)
+                        controller.send_clear_osd()
+                        controller.send_display_osd()
+                        controller.reset_send_uid()
+
+                gevent.spawn(delayed_clear)
+                logger.info(f"Sent test for element '{element_id}' to pilot {pilot_id} (clearing after {uptime_deciseconds * 0.1}s): {messages}")
+            else:
+                logger.info(f"Sent test for element '{element_id}' to pilot {pilot_id} (static): {messages}")
 
             return jsonify({
                 'success': True,
