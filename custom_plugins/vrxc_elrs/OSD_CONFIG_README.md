@@ -13,7 +13,27 @@ This enhancement adds per-pilot OSD element configuration with a visual preview 
   - Drag-and-drop element positioning
   - Manual controls for row, alignment, and custom column
   - Live preview of element positions
+  - **Test buttons to send each element type to pilot's goggles**
   - Save per-pilot or reset to defaults
+
+### Test Message Feature
+The configuration interface includes test buttons for each OSD element, allowing you to:
+- Send a realistic test message directly to the pilot's goggles
+- Verify element positioning before a race
+- Test display timing (timed elements will clear after their configured uptime)
+- Confirm the pilot's backpack connection is working
+
+Available test message types:
+- Heat Name, Class Name, Event Name
+- Race Stage ("ARM NOW"), Race Start ("GO!"), Race Finish, Race Stop
+- Current Lap/Position
+- Lap Results (time and gap display)
+- Recent Laps (rolling lap times)
+- Announcement
+- Pilot Done ("FINISHED!")
+- Results (placement and win condition)
+
+Each test message uses the actual formatting and positioning that would be used during a real race, ensuring what you see in testing matches the live experience.
 
 ### 2. Global vs Per-Pilot Configuration
 
