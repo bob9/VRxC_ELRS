@@ -85,10 +85,18 @@ Each element can be configured with:
 - The LAP counter only increments for valid laps
 - Short laps that are filtered/aggregated do not increment the displayed lap count
 
+#### Rolling Recent Laps
+The Recent Laps feature displays a rolling list of the pilot's most recent lap times during a race:
+- Shows the last N laps (configurable via `num_laps` setting, default 3)
+- Updates automatically each time a new lap is recorded
+- Can be configured as timed (disappears after uptime) or static (always visible)
+- Displays holeshot as "HS" and subsequent laps as "L1", "L2", etc.
+
 #### Recent Laps Display Format
 - Displays lap times in seconds-only format with 2 decimal places
 - Format: `HS:45.01` (holeshot), `L1:44.23` (lap 1), `L2:43.56` (lap 2)
 - Compact format saves screen space compared to `MM:SS.mmm` format
+- Short laps (under minimum lap time) are aggregated into the next valid lap
 
 ### 6. Configuration Storage
 Per-pilot configurations are stored in the `elrs_osd_config` pilot attribute as JSON.
