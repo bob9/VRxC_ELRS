@@ -342,27 +342,41 @@ class ELRSBackpack(VRxController):
         :param custom_col: Column position (meaning depends on alignment type)
         :return: Starting column position (0-49)
         """
-        # Calculate visible text length (excluding color codes)
-        text_length = self.get_visible_text_length(text)
+        # Use full text length (color codes still occupy column space)
+        text_length = len(text)
+
+        logger.info(f"calculate_osd_column: text='{text}', alignment='{alignment}', custom_col={custom_col}, text_length={text_length}")
 
         if alignment == "left":
             # custom_col is already the LEFT edge position
-            return max(0, min(custom_col, 49))
+            result = max(0, min(custom_col, 49))
+            logger.info(f"  LEFT alignment: result={result}")
+            return result
         elif alignment == "right":
             # custom_col is the RIGHT edge position
+            # If custom_col is 0 (default), use 49 (rightmost column)
+            right_edge = custom_col if custom_col > 0 else 49
             # Calculate starting position: right_edge - text_length + 1
-            col = custom_col - text_length + 1
-            return max(col, 0)
+            col = right_edge - text_length + 1
+            result = max(col, 0)
+            logger.info(f"  RIGHT alignment: right_edge={right_edge}, col={col}, result={result}")
+            return result
         elif alignment == "center":
             # custom_col is the CENTER position
+            # If custom_col is 0 (default), use 25 (center of screen)
+            center = custom_col if custom_col > 0 else 25
             # Calculate starting position: center - (text_length / 2)
             offset = text_length // 2
-            col = custom_col - offset
-            return max(col, 0)
+            col = center - offset
+            result = max(col, 0)
+            logger.info(f"  CENTER alignment: center={center}, offset={offset}, col={col}, result={result}")
+            return result
         else:
             # Fallback for any other alignment type (backward compatibility)
             # Treat as left-aligned
-            return max(0, min(custom_col, 49))
+            result = max(0, min(custom_col, 49))
+            logger.info(f"  FALLBACK alignment: result={result}")
+            return result
 
     def send_msp(self, msp: MSPPacket) -> None:
         """
@@ -451,6 +465,7 @@ class ELRSBackpack(VRxController):
         :param col: The column to place the start of the
         :param message: _description_
         """
+        logger.info(f"send_osd_text: row={row}, col={col}, text='{text}', len={len(text)}")
         payload = bytearray((0x03, row, col, 0))
         for index, char in enumerate(text):
             if index >= 50:
@@ -718,7 +733,7 @@ class ELRSBackpack(VRxController):
                 num_laps = int(self.get_osd_setting(pilot_id, 'recent_laps', 'num_laps', '_recentlaps_count', 3) or 3)
 
                 # Generate mock recent lap times (seconds only format)
-                mock_recent = [f'HS:45.012' if i == 0 else f'L{i}:4{5-i}.{i}23' for i in range(num_laps)]
+                mock_recent = [f'HS:45.01' if i == 0 else f'L{i}:4{5-i}.{i}2' for i in range(num_laps)]
                 for i, lap_time in enumerate(mock_recent):
                     col = self.calculate_osd_column(lap_time, alignment, custom_col)
                     messages.append({'row': base_row + i, 'col': col, 'message': lap_time})
@@ -1201,10 +1216,47 @@ class ELRSBackpack(VRxController):
             if pilot_currentlap_enabled is not None and not pilot_currentlap_enabled:
                 return  # Skip if explicitly disabled for this pilot
 
+            # Find seat for this pilot
+            seat = None
+            for slot, pid in self._rhapi.race.pilots.items():
+                if pid == pilot_id:
+                    seat = slot
+                    break
+
+            if seat is None:
+                return
+
+            # Get lap data and calculate aggregated lap count
+            all_laps = self._rhapi.race.laps_raw
+            all_pilot_laps = all_laps[seat] if seat < len(all_laps) else []
+
+            # Get minimum lap time in milliseconds
+            min_lap_sec = int(self._rhapi.db.option("MinLapSec") or 0)
+            min_lap_ms = min_lap_sec * 1000
+
+            # Calculate aggregated lap count (same logic as show_recent_laps)
+            aggregated_lap_count = 0
+            pending_time = 0
+
+            for i, lap in enumerate(all_pilot_laps):
+                lap_time = lap.get("lap_time", 0)
+                if lap_time <= 0:
+                    continue
+
+                if i == 0:
+                    # Holeshot counts as first lap
+                    aggregated_lap_count += 1
+                else:
+                    # Aggregate time until we reach min_lap_ms
+                    pending_time += lap_time
+                    if pending_time >= min_lap_ms:
+                        aggregated_lap_count += 1
+                        pending_time = 0
+
             if self._rhapi.db.option("_position_mode") != "1":
-                message = f"LAP: {result['laps'] + 1}"
+                message = f"LAP: {aggregated_lap_count}"
             else:
-                message = f"POSN: {str(result['position']).upper()} | LAP: {result['laps'] + 1}"
+                message = f"POSN: {str(result['position']).upper()} | LAP: {aggregated_lap_count}"
 
             # Get per-pilot settings
             currentlap_row = int(self.get_osd_setting(pilot_id, 'current_lap', 'row', '_currentlap_row', 0) or 0)
@@ -1458,9 +1510,9 @@ class ELRSBackpack(VRxController):
                 # Display each recent lap
                 # Display index 0 = HS (holeshot), index 1 = L1, index 2 = L2, etc.
                 for i, (display_idx, lap_time_ms) in enumerate(recent):
-                    # Convert lap_time (milliseconds) to total seconds with 3 decimal places
+                    # Convert lap_time (milliseconds) to total seconds with 2 decimal places
                     total_seconds = lap_time_ms / 1000.0
-                    lap_time = f"{total_seconds:.3f}"
+                    lap_time = f"{total_seconds:.2f}"
                     if display_idx == 0:
                         message = f"HS:{lap_time}"
                     else:
