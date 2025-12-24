@@ -116,6 +116,13 @@ def initialize_routes(rhapi, controller):
                 'enabled': rhapi.db.option('_show_laptimes', True),
                 'uptime': rhapi.db.option('_laptimes_uptime', 100)
             },
+            'recent_laps': {
+                'row': rhapi.db.option('_recentlaps_row', 11),
+                'alignment': rhapi.db.option('_recentlaps_align', 'left'),
+                'custom_col': rhapi.db.option('_recentlaps_custom_col', 0),
+                'enabled': rhapi.db.option('_show_recentlaps', True),
+                'num_laps': rhapi.db.option('_recentlaps_count', 3)
+            },
             'behavior': {
                 '_round_num': rhapi.db.option('_round_num', False),
                 '_gap_mode': rhapi.db.option('_gap_mode', False),
@@ -513,8 +520,10 @@ def initialize_routes(rhapi, controller):
                 element_config = global_config.get(element_id, {})
 
             # Get display mode and duration from config
-            is_timed = element_config.get('is_timed', False)
+            # Match frontend logic: default to timed if uptime > 0
             uptime_deciseconds = int(element_config.get('uptime', 0))
+            default_is_timed = uptime_deciseconds > 0
+            is_timed = element_config.get('is_timed', default_is_timed)
 
             # Spawn delayed clear if timed mode and uptime > 0
             if is_timed and uptime_deciseconds > 0:

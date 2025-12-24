@@ -416,7 +416,8 @@
             { id: 'announcement', label: 'Announcement', row_key: '_announcement_row', align_key: '_announcement_align', col_key: '_announcement_custom_col', example: 'NEXT RACE IN 5 MINUTES', uptimeKey: '_announcement_uptime' },
             { id: 'leader', label: 'Leader Message', row_key: '_status_row', align_key: '_leader_align', col_key: '_leader_custom_col', example: 'RACE LEADER | 0:42.1', uptimeKey: '_leader_uptime', messageKey: '_leader_message', defaultMessage: 'RACE LEADER' },
             { id: 'results', label: 'Results', row_key: '_results_row', align_key: '_placement_align', col_key: '_placement_custom_col', example: 'PLACEMENT: 2', uptimeKey: '_placement_uptime' },
-            { id: 'lap_times', label: 'Lap Times Display', description: 'Displays individual lap times when pilot finishes race (enable this checkbox to show)', row_key: '_laptimes_row', align_key: '_laptimes_align', col_key: '_laptimes_custom_col', example: 'L1: 0:45.2', multiline: ['L1: 0:45.2', 'L2: 0:46.1', 'L3: 0:44.5'], uptimeKey: '_laptimes_uptime' },
+            { id: 'lap_times', label: 'Lap Times Display', description: 'Displays individual lap times when pilot finishes race (enable this checkbox to show)', row_key: '_laptimes_row', align_key: '_laptimes_align', col_key: '_laptimes_custom_col', example: 'HS: 0:45.2', multiline: ['HS: 0:45.2', 'L1: 0:46.1', 'L2: 0:44.5'], uptimeKey: '_laptimes_uptime' },
+            { id: 'recent_laps', label: 'Recent Laps (Rolling)', description: 'Displays last N lap times during race, updates on each lap', row_key: '_recentlaps_row', align_key: '_recentlaps_align', col_key: '_recentlaps_custom_col', example: 'HS: 0:45.2', multiline: ['HS: 0:45.2', 'L1: 0:46.1', 'L2: 0:44.5'], numLapsKey: '_recentlaps_count', enabledKey: '_show_recentlaps' },
         ];
 
         // Helper function to get default value from global DB settings
@@ -591,8 +592,24 @@
                     elementDiv.style.top = (row * CELL_HEIGHT + 10) + 'px';
                     elementDiv.dataset.elementId = element.id;
 
-                    // Add all lines as text content with line breaks
-                    elementDiv.textContent = element.multiline.join('\n');
+                    // Generate multiline content - for elements with numLapsKey, use dynamic count
+                    let multilineContent;
+                    if (element.numLapsKey) {
+                        const numLaps = config.num_laps || 3;
+                        const lines = [];
+                        for (let i = 0; i < numLaps; i++) {
+                            // Index 0 = HS (holeshot), index 1 = L1, etc.
+                            if (i === 0) {
+                                lines.push('HS: 0:4' + (5 - (i % 5)) + '.' + i);
+                            } else {
+                                lines.push('L' + i + ': 0:4' + (5 - (i % 5)) + '.' + i);
+                            }
+                        }
+                        multilineContent = lines.join('\n');
+                    } else {
+                        multilineContent = element.multiline.join('\n');
+                    }
+                    elementDiv.textContent = multilineContent;
 
                     // Add drag handlers
                     elementDiv.addEventListener('mousedown', startDrag);
@@ -849,6 +866,12 @@
                         <label>Display Duration (decaseconds):</label>
                         <input type="number" id="uptime-${element.id}" min="1" max="999" value="${uptime || 5}">
                     </div>
+                    ${element.numLapsKey ? `
+                    <div class="control-group">
+                        <label>Number of Laps to Display:</label>
+                        <input type="number" id="numlaps-${element.id}" min="1" max="10" value="${config.num_laps || 3}">
+                    </div>
+                    ` : ''}
                     <div class="control-row">
                         <div class="control-group">
                             <label>Align:</label>
@@ -900,6 +923,11 @@
                 document.getElementById('col-' + element.id).addEventListener('change', updateElementFromControls);
                 document.getElementById('uptime-' + element.id).addEventListener('change', updateElementFromControls);
 
+                // Add event listener for num_laps if element has numLapsKey
+                if (element.numLapsKey) {
+                    document.getElementById('numlaps-' + element.id).addEventListener('change', updateElementFromControls);
+                }
+
                 // Add event listener for message content if element has messageKey
                 if (element.messageKey) {
                     document.getElementById('message-' + element.id).addEventListener('change', function(event) {
@@ -947,6 +975,8 @@
                         document.getElementById('uptime-' + elementId).value = 5;
                     }
                 }
+            } else if (type === 'numlaps') {
+                pilotConfig[elementId].num_laps = parseInt(event.target.value);
             }
 
             // Disable use global checkbox if this is a pilot config change

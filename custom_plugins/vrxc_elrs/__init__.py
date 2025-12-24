@@ -42,7 +42,8 @@ def initialize(rhapi: RHAPI.RHAPI):
             '_announcement_row', '_announcement_align', '_announcement_custom_col',
             '_leader_align', '_leader_custom_col',
             '_results_row', '_placement_align', '_placement_custom_col', '_post_results',
-            '_laptimes_row', '_laptimes_align', '_laptimes_custom_col', '_show_laptimes'
+            '_laptimes_row', '_laptimes_align', '_laptimes_custom_col', '_show_laptimes',
+            '_recentlaps_row', '_recentlaps_align', '_recentlaps_custom_col', '_show_recentlaps', '_recentlaps_count'
         ]
 
         # Only sync if an OSD-related option was changed
@@ -97,7 +98,12 @@ def initialize(rhapi: RHAPI.RHAPI):
                     '_laptimes_row': ('lap_times', 'row'),
                     '_laptimes_align': ('lap_times', 'alignment'),
                     '_laptimes_custom_col': ('lap_times', 'custom_col'),
-                    '_show_laptimes': ('lap_times', 'enabled')
+                    '_show_laptimes': ('lap_times', 'enabled'),
+                    '_recentlaps_row': ('recent_laps', 'row'),
+                    '_recentlaps_align': ('recent_laps', 'alignment'),
+                    '_recentlaps_custom_col': ('recent_laps', 'custom_col'),
+                    '_show_recentlaps': ('recent_laps', 'enabled'),
+                    '_recentlaps_count': ('recent_laps', 'num_laps')
                 }
 
                 if option_name in option_to_element:
@@ -210,8 +216,8 @@ def initialize(rhapi: RHAPI.RHAPI):
     )
     rhapi.fields.register_option(_conn_opt, "elrs_settings")
 
-    # Note: OSD configuration options are now managed through the OSD Configuration Page
-    # The database options are still created by the backend, but not displayed in the old UI
+    # Note: OSD configuration options (including Recent Laps settings) are now managed
+    # through the OSD Configuration Page at /elrs_osd_config
 
     #
     # Quick Buttons
