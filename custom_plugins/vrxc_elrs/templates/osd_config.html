@@ -1,0 +1,1540 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ELRS OSD Configuration</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #1a1a1a;
+            color: #fff;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .header {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            position: relative;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 15px;
+            padding: 8px 16px;
+            background: #4a9eff;
+            color: #fff;
+            text-decoration: none;
+            border-radius: 4px;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        .back-link:hover {
+            background: #357ac9;
+            text-decoration: none;
+        }
+        .back-link::before {
+            content: '← ';
+        }
+        .pilot-selector {
+            margin-bottom: 20px;
+        }
+        .pilot-selector select {
+            padding: 10px;
+            font-size: 16px;
+            width: 300px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 4px;
+        }
+        .main-content {
+            display: flex;
+            gap: 20px;
+        }
+        .osd-preview {
+            flex: 1;
+            background: #000;
+            border: 2px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            position: relative;
+            min-height: 600px;
+        }
+        .osd-grid {
+            position: relative;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 20px;
+            color: #fff;
+            background: #000;
+            border: 1px solid #444;
+            padding: 10px;
+            width: fit-content;
+            overflow: hidden;
+        }
+        .osd-row {
+            display: flex;
+            height: 20px;
+            position: relative;
+        }
+        .osd-cell {
+            width: 14px;
+            height: 20px;
+            display: inline-block;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.05);
+            box-sizing: border-box;
+        }
+        .osd-element {
+            position: absolute;
+            padding: 0px;
+            cursor: move;
+            user-select: none;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 3px;
+            transition: background 0.2s;
+            white-space: nowrap;
+            line-height: 18px;
+            /* Use monospace font with character width matching grid cells */
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            /* Adjust letter spacing so each character occupies exactly 14px (CELL_WIDTH) */
+            /* For Courier New at 14px, character width is ~8.4px, so we need ~5.6px extra per char */
+            letter-spacing: 5.6px;
+        }
+        .osd-element-multiline {
+            white-space: pre;
+        }
+        .osd-element:hover {
+            background: rgba(255,255,255,0.2);
+            border-color: rgba(255,255,255,0.5);
+        }
+        .osd-element.dragging {
+            opacity: 0.7;
+            background: rgba(100,150,255,0.3);
+            z-index: 1000;
+        }
+        .controls-panel {
+            width: 400px;
+            background: #2a2a2a;
+            border-radius: 8px;
+            padding: 20px;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        .element-control {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #333;
+            border-radius: 6px;
+        }
+        .element-control h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #4a9eff;
+        }
+        .control-group {
+            margin-bottom: 10px;
+        }
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+            color: #aaa;
+        }
+        .control-group input[type="number"],
+        .control-group select {
+            width: 100%;
+            padding: 8px;
+            background: #222;
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 14px;
+        }
+        .control-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .control-row .control-group {
+            flex: 1;
+            margin-bottom: 0;
+        }
+        .control-row .control-group label {
+            font-size: 11px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .control-row .control-group input[type="number"],
+        .control-row .control-group select {
+            width: 100%;
+        }
+        .control-group input[type="checkbox"] {
+            margin-right: 8px;
+        }
+        .button-group {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        .btn-primary {
+            background: #4a9eff;
+            color: #fff;
+        }
+        .btn-primary:hover {
+            background: #3a8eef;
+        }
+        .btn-secondary {
+            background: #555;
+            color: #fff;
+        }
+        .btn-secondary:hover {
+            background: #666;
+        }
+        .info-text {
+            font-size: 12px;
+            color: #888;
+            margin-top: 10px;
+        }
+        .grid-info {
+            margin-bottom: 10px;
+            padding: 10px;
+            background: #222;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #aaa;
+        }
+        .global-options {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #333;
+            border-radius: 6px;
+            border: 2px solid #4a9eff;
+        }
+        .global-options h3 {
+            margin: 0 0 15px 0;
+            font-size: 14px;
+            color: #4a9eff;
+        }
+        .global-options .checkbox-group {
+            margin-bottom: 10px;
+        }
+        .global-options .checkbox-group label {
+            display: flex;
+            align-items: center;
+            font-size: 13px;
+            color: #fff;
+            cursor: pointer;
+        }
+        .global-options .checkbox-group input[type="checkbox"] {
+            width: auto;
+            margin-right: 10px;
+        }
+        .global-options .checkbox-description {
+            font-size: 11px;
+            color: #888;
+            margin-left: 24px;
+            margin-top: -5px;
+            margin-bottom: 10px;
+        }
+        .message-input-group {
+            margin-bottom: 10px;
+        }
+        .message-input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+            color: #aaa;
+        }
+        .message-input-group input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            background: #222;
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 14px;
+            font-family: 'Courier New', monospace;
+        }
+        .message-input-group .helper-text {
+            font-size: 10px;
+            color: #666;
+            margin-top: 3px;
+            font-style: italic;
+        }
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10000;
+            min-width: 300px;
+        }
+        .toast {
+            background: #ff6b6b;
+            color: #fff;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            animation: slideInTop 0.3s ease-out;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .toast.info {
+            background: #4a9eff;
+        }
+        .toast.success {
+            background: #28a745;
+        }
+        .toast.warning {
+            background: #ffa500;
+        }
+        @keyframes slideInTop {
+            from {
+                transform: translateY(-100px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        @keyframes slideOutTop {
+            from {
+                transform: translateY(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateY(-100px);
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="toast-container" id="toastContainer"></div>
+    <div class="container">
+        <div class="header">
+            <a href="/settings" class="back-link">Back</a>
+            <h1>ELRS OSD Configuration</h1>
+            <p>Configure OSD element positions for each pilot. Drag elements in the preview or use the controls.</p>
+        </div>
+
+        <div class="pilot-selector">
+            <label for="pilotSelect">Select Pilot:</label>
+            <select id="pilotSelect">
+                <option value="global" selected>🌐 Global Configuration</option>
+                {% for pilot in pilots %}
+                <option value="{{ pilot.id }}">{{ pilot.callsign or pilot.name or 'Pilot ' ~ pilot.id }}</option>
+                {% endfor %}
+            </select>
+            <button id="clearScreenBtn" class="btn btn-warning" style="margin-left: 15px; display: none;">Clear Pilot Screen</button>
+            <div id="useGlobalContainer" style="display: none; margin-top: 10px;">
+                <label>
+                    <input type="checkbox" id="useGlobalCheckbox">
+                    Use Global Configuration for this pilot
+                </label>
+                <p style="font-size: 12px; color: #aaa; margin-top: 5px;">
+                    When checked, this pilot will use the global OSD configuration. Uncheck to create a custom configuration.
+                </p>
+            </div>
+            <div id="uidContainer" style="display: none; margin-top: 10px;">
+                <label for="pilotUidInput">ELRS BP Bind Phrase:</label>
+                <div style="margin-top: 5px;">
+                    <input type="text" id="pilotUidInput" placeholder="" style="max-width: 400px; padding: 8px; background: #333; border: 1px solid #555; border-radius: 4px; color: #fff;">
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="osd-preview">
+                <h2>OSD Preview (18 rows × 50 columns)</h2>
+                <div class="grid-info">
+                    The grid below represents the pilot's OSD display. Drag elements to position them or use the controls on the right.
+                </div>
+                <div id="osdGrid" class="osd-grid">
+                    <!-- Grid will be generated by JavaScript -->
+                </div>
+            </div>
+
+            <div class="controls-panel">
+                <h2>Element Controls</h2>
+                <div id="elementControls">
+                    <!-- Controls will be generated by JavaScript -->
+                </div>
+
+                <div class="button-group">
+                    <button id="resetBtn" class="btn btn-secondary">Reset to Defaults</button>
+                </div>
+                <div class="info-text">
+                    Changes are saved per-pilot and will override global settings.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const OSD_ROWS = 18;
+        const OSD_COLS = 50;
+        const CELL_WIDTH = 14;
+        const CELL_HEIGHT = 20;
+
+        // Global database settings from server
+        const globalDBSettings = {{ global_db_settings|safe }};
+
+        // OSD Element definitions - defaults will come from globalDBSettings
+        // All elements can now be configured as static or timed
+        // Examples should match the actual message format sent by Python (including spaces but excluding color codes)
+        // Some elements have different examples based on behavior flags
+        const elements = [
+            { id: 'heat_name', label: 'Heat Name', row_key: '_heatname_row', align_key: '_heatname_align', col_key: '_heatname_custom_col', example: 'HEAT 1 | ROUND 2', exampleOff: 'HEAT 1', flagKey: '_round_num', uptimeKey: '_heatname_uptime' },
+            { id: 'class_name', label: 'Class Name', row_key: '_classname_row', align_key: '_classname_align', col_key: '_classname_custom_col', example: 'CLASS 1 | ROUND 2', exampleOff: 'CLASS 1', flagKey: '_round_num', uptimeKey: '_classname_uptime' },
+            { id: 'event_name', label: 'Event Name', row_key: '_eventname_row', align_key: '_eventname_align', col_key: '_eventname_custom_col', example: 'RACE EVENT 2025', uptimeKey: '_eventname_uptime' },
+            { id: 'race_stage', label: 'Race Stage Message', row_key: '_status_row', align_key: '_racestage_align', col_key: '_racestage_custom_col', example: 'ARM NOW', uptimeKey: '_racestage_uptime', messageKey: '_racestage_message', defaultMessage: 'w ARM NOW x' },
+            { id: 'race_start', label: 'Race Start Message', row_key: '_status_row', align_key: '_racestart_align', col_key: '_racestart_custom_col', example: 'GO!', uptimeKey: '_racestart_uptime', messageKey: '_racestart_message', defaultMessage: 'w   GO!   x' },
+            { id: 'race_finish', label: 'Race Finish Message', row_key: '_status_row', align_key: '_racefinish_align', col_key: '_racefinish_custom_col', example: 'FINISH LAP!', uptimeKey: '_finish_uptime', messageKey: '_racefinish_message', defaultMessage: 'w FINISH LAP! x' },
+            { id: 'race_stop', label: 'Race Stop Message', row_key: '_status_row', align_key: '_racestop_align', col_key: '_racestop_custom_col', example: 'LAND NOW!', uptimeKey: '_racestop_uptime', messageKey: '_racestop_message', defaultMessage: 'w  LAND NOW!  x' },
+            { id: 'current_lap', label: 'Current Lap/Position', row_key: '_currentlap_row', align_key: '_currentlap_align', col_key: '_currentlap_custom_col', example: 'POSN: 2ND | LAP: 4', exampleOff: 'LAP: 4', flagKey: '_position_mode', uptimeKey: '_currentlap_uptime' },
+            { id: 'lap_results', label: 'Lap Results', row_key: '_lapresults_row', align_key: '_lapresults_align', col_key: '_lapresults_custom_col', example: 'GAP: +0:02.3', exampleOff: 'BEST LAP | 0:24.5', flagKey: '_gap_mode', uptimeKey: '_results_uptime' },
+            { id: 'announcement', label: 'Announcement', row_key: '_announcement_row', align_key: '_announcement_align', col_key: '_announcement_custom_col', example: 'NEXT RACE IN 5 MINUTES', uptimeKey: '_announcement_uptime' },
+            { id: 'leader', label: 'Leader Message', row_key: '_status_row', align_key: '_leader_align', col_key: '_leader_custom_col', example: 'RACE LEADER | 0:42.1', uptimeKey: '_leader_uptime', messageKey: '_leader_message', defaultMessage: 'RACE LEADER' },
+            { id: 'results', label: 'Results', row_key: '_results_row', align_key: '_placement_align', col_key: '_placement_custom_col', example: 'PLACEMENT: 2', uptimeKey: '_placement_uptime' },
+            { id: 'lap_times', label: 'Lap Times Display', description: 'Displays individual lap times when pilot finishes race (enable this checkbox to show)', row_key: '_laptimes_row', align_key: '_laptimes_align', col_key: '_laptimes_custom_col', example: 'L1: 0:45.2', multiline: ['L1: 0:45.2', 'L2: 0:46.1', 'L3: 0:44.5'], uptimeKey: '_laptimes_uptime' },
+        ];
+
+        // Helper function to get default value from global DB settings
+        function getDefaultValue(elementId, key) {
+            if (globalDBSettings[elementId] && globalDBSettings[elementId][key] !== undefined) {
+                return globalDBSettings[elementId][key];
+            }
+            // Fallback defaults
+            const fallbacks = {
+                row: 5,
+                alignment: 'center',
+                custom_col: 0,
+                enabled: true,
+                uptime: 5
+            };
+            return fallbacks[key];
+        }
+
+        // Toast notification function
+        function showToast(message, type = 'warning') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+
+            // Choose icon based on type
+            let icon = '⚠️';
+            if (type === 'success') icon = '✓';
+            else if (type === 'info') icon = 'ℹ';
+            else if (type === 'warning') icon = '⚠️';
+
+            toast.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
+            container.appendChild(toast);
+
+            // Auto remove after 4 seconds
+            setTimeout(() => {
+                toast.style.animation = 'slideOutTop 0.3s ease-out forwards';
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        // Helper function to get the appropriate example text based on behavior flags
+        function getExampleText(element) {
+            if (!element.flagKey) {
+                // No flag dependency, return default example
+                return element.example;
+            }
+
+            // Get the flag value from current config
+            let flagValue;
+            if (currentPilotId === 'global') {
+                flagValue = globalConfig[element.flagKey];
+            } else {
+                flagValue = pilotConfig[element.flagKey];
+            }
+
+            // Fall back to global DB setting if not set
+            if (flagValue === undefined && globalDBSettings.behavior && globalDBSettings.behavior[element.flagKey] !== undefined) {
+                flagValue = globalDBSettings.behavior[element.flagKey];
+            }
+
+            // Return appropriate example
+            return flagValue ? element.example : (element.exampleOff || element.example);
+        }
+
+        let currentPilotId = null;
+        let pilotConfig = {};
+        let globalConfig = {};
+        let useGlobal = false;
+        let draggingElement = null;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+        let hasDragged = false; // Track if actual dragging occurred
+
+        // Initialize the grid
+        function initGrid() {
+            const grid = document.getElementById('osdGrid');
+            grid.innerHTML = '';
+
+            for (let row = 0; row < OSD_ROWS; row++) {
+                const rowDiv = document.createElement('div');
+                rowDiv.className = 'osd-row';
+                rowDiv.style.height = CELL_HEIGHT + 'px';
+
+                for (let col = 0; col < OSD_COLS; col++) {
+                    const cell = document.createElement('span');
+                    cell.className = 'osd-cell';
+                    cell.textContent = ' ';
+                    rowDiv.appendChild(cell);
+                }
+
+                grid.appendChild(rowDiv);
+            }
+        }
+
+        // Calculate visible text length (excluding color codes)
+        // In HDZero OSD, lowercase letters are color codes that don't display
+        function getVisibleTextLength(text) {
+            // Remove all lowercase letters (color codes)
+            const visibleText = text.replace(/[a-z]/g, '');
+            console.log(`[getVisibleTextLength] Original: "${text}" (${text.length}), Visible: "${visibleText}" (${visibleText.length})`);
+            return visibleText.length;
+        }
+
+        // Calculate column based on alignment
+        // This function mirrors the Python backend logic exactly
+        // The custom_col parameter meaning varies by alignment type:
+        // - left: custom_col is the LEFT edge position
+        // - right: custom_col is the RIGHT edge position
+        // - center: custom_col is the CENTER position
+        // The function always returns the LEFT edge (starting column) where text should begin
+        function calculateColumn(text, alignment, custom_col) {
+            const text_length = getVisibleTextLength(text);
+            let col = 0;
+
+            if (alignment === 'left') {
+                // custom_col is already the LEFT edge position
+                col = Math.max(0, Math.min(custom_col, OSD_COLS - 1));
+            } else if (alignment === 'right') {
+                // custom_col is the RIGHT edge position
+                // Calculate starting position: right_edge - text_length + 1
+                col = Math.max(0, custom_col - text_length + 1);
+            } else if (alignment === 'center') {
+                // custom_col is the CENTER position
+                // Calculate starting position: center - (text_length / 2)
+                const offset = Math.floor(text_length / 2);
+                col = Math.max(0, custom_col - offset);
+            } else {
+                // Fallback for any other alignment (backward compatibility)
+                // Treat as left-aligned
+                col = Math.max(0, Math.min(custom_col, OSD_COLS - 1));
+            }
+
+            console.log(`[calculateColumn] text="${text}", alignment="${alignment}", custom_col=${custom_col}, text_length=${text_length}, calculated_col=${col}`);
+            return col;
+        }
+
+        // Render elements on the grid
+        function renderElements() {
+            // Remove existing elements
+            document.querySelectorAll('.osd-element').forEach(el => el.remove());
+
+            // Don't render any elements if no pilot is selected
+            if (!currentPilotId) {
+                return;
+            }
+
+            const grid = document.getElementById('osdGrid');
+
+            elements.forEach(element => {
+                const config = pilotConfig[element.id] || {};
+
+                // Check if element is enabled (use global DB setting as default)
+                const enabled = config.enabled !== undefined ? config.enabled : getDefaultValue(element.id, 'enabled');
+                if (!enabled) {
+                    return; // Skip disabled elements
+                }
+
+                const row = config.row !== undefined ? config.row : getDefaultValue(element.id, 'row');
+                const alignment = config.alignment || getDefaultValue(element.id, 'alignment');
+                const customCol = config.custom_col !== undefined ? config.custom_col : getDefaultValue(element.id, 'custom_col');
+
+                // Handle multiline elements
+                if (element.multiline && Array.isArray(element.multiline)) {
+                    // Create a single container for all lines
+                    const exampleText = getExampleText(element);
+                    const col = calculateColumn(exampleText, alignment, customCol);
+
+                    const elementDiv = document.createElement('div');
+                    elementDiv.className = 'osd-element osd-element-multiline';
+                    elementDiv.id = 'element-' + element.id;
+                    elementDiv.style.left = (col * CELL_WIDTH + 10) + 'px';
+                    elementDiv.style.top = (row * CELL_HEIGHT + 10) + 'px';
+                    elementDiv.dataset.elementId = element.id;
+
+                    // Add all lines as text content with line breaks
+                    elementDiv.textContent = element.multiline.join('\n');
+
+                    // Add drag handlers
+                    elementDiv.addEventListener('mousedown', startDrag);
+
+                    // Add click handler to scroll to control
+                    elementDiv.addEventListener('click', function(e) {
+                        // Only scroll if not dragging (check hasDragged flag)
+                        if (!hasDragged) {
+                            const controlDiv = document.getElementById('control-' + element.id);
+                            if (controlDiv) {
+                                controlDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                // Highlight the control briefly
+                                controlDiv.style.backgroundColor = 'rgba(100, 150, 255, 0.3)';
+                                setTimeout(() => {
+                                    controlDiv.style.backgroundColor = '';
+                                }, 1000);
+                            }
+                        }
+                    });
+
+                    grid.appendChild(elementDiv);
+                } else {
+                    // Single line element
+                    const exampleText = getExampleText(element);
+                    const col = calculateColumn(exampleText, alignment, customCol);
+
+                    const elementDiv = document.createElement('div');
+                    elementDiv.className = 'osd-element';
+                    elementDiv.id = 'element-' + element.id;
+                    elementDiv.textContent = exampleText;
+                    elementDiv.style.left = (col * CELL_WIDTH + 10) + 'px';
+                    elementDiv.style.top = (row * CELL_HEIGHT + 10) + 'px';
+                    elementDiv.dataset.elementId = element.id;
+
+                    // Add drag handlers
+                    elementDiv.addEventListener('mousedown', startDrag);
+
+                    // Add click handler to scroll to control
+                    elementDiv.addEventListener('click', function(e) {
+                        // Only scroll if not dragging (check hasDragged flag)
+                        if (!hasDragged) {
+                            const controlDiv = document.getElementById('control-' + element.id);
+                            if (controlDiv) {
+                                controlDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                // Highlight the control briefly
+                                controlDiv.style.backgroundColor = 'rgba(100, 150, 255, 0.3)';
+                                setTimeout(() => {
+                                    controlDiv.style.backgroundColor = '';
+                                }, 1000);
+                            }
+                        }
+                    });
+
+                    grid.appendChild(elementDiv);
+                }
+            });
+        }
+
+        // Initialize controls
+        function initControls() {
+            const controlsDiv = document.getElementById('elementControls');
+            controlsDiv.innerHTML = '';
+
+            // Add Behavior Options section (for both global and per-pilot config)
+            const behaviorOptionsDiv = document.createElement('div');
+            behaviorOptionsDiv.className = 'global-options';
+            behaviorOptionsDiv.id = 'behavior-options';
+
+            // Get behavior values from pilot config or fall back to global defaults
+            let showRoundNum, showPositionMode, showGapTime, showPostRaceResults;
+
+            if (currentPilotId === 'global') {
+                // For global config, read from globalConfig
+                showRoundNum = globalConfig._round_num !== undefined ? globalConfig._round_num :
+                    (globalDBSettings.behavior && globalDBSettings.behavior._round_num !== undefined ? globalDBSettings.behavior._round_num : false);
+                showPositionMode = globalConfig._position_mode !== undefined ? globalConfig._position_mode :
+                    (globalDBSettings.behavior && globalDBSettings.behavior._position_mode !== undefined ? globalDBSettings.behavior._position_mode : false);
+                showGapTime = globalConfig._gap_mode !== undefined ? globalConfig._gap_mode :
+                    (globalDBSettings.behavior && globalDBSettings.behavior._gap_mode !== undefined ? globalDBSettings.behavior._gap_mode : false);
+                showPostRaceResults = globalConfig._results_mode !== undefined ? globalConfig._results_mode :
+                    (globalDBSettings.behavior && globalDBSettings.behavior._results_mode !== undefined ? globalDBSettings.behavior._results_mode : false);
+            } else {
+                // For per-pilot config, read from pilot config or fall back to global defaults
+                showRoundNum = pilotConfig._round_num !== undefined ? pilotConfig._round_num :
+                    (globalDBSettings.behavior && globalDBSettings.behavior._round_num !== undefined ? globalDBSettings.behavior._round_num : false);
+                showPositionMode = pilotConfig._position_mode !== undefined ? pilotConfig._position_mode :
+                    (globalDBSettings.behavior && globalDBSettings.behavior._position_mode !== undefined ? globalDBSettings.behavior._position_mode : false);
+                showGapTime = pilotConfig._gap_mode !== undefined ? pilotConfig._gap_mode :
+                    (globalDBSettings.behavior && globalDBSettings.behavior._gap_mode !== undefined ? globalDBSettings.behavior._gap_mode : false);
+                showPostRaceResults = pilotConfig._results_mode !== undefined ? pilotConfig._results_mode :
+                    (globalDBSettings.behavior && globalDBSettings.behavior._results_mode !== undefined ? globalDBSettings.behavior._results_mode : false);
+            }
+
+            const titleText = currentPilotId === 'global' ? 'Global Behavior Options' : 'Pilot Behavior Options';
+
+            behaviorOptionsDiv.innerHTML = `
+                <h3>${titleText}</h3>
+                <div class="checkbox-group">
+                    <label>
+                        <input type="checkbox" id="behavior-round-num" ${showRoundNum ? 'checked' : ''}>
+                        Show Round Number
+                    </label>
+                    <div class="checkbox-description">
+                        <strong>Affects:</strong> Heat Name, Class Name (displayed at race start)<br>
+                        <strong>ON:</strong> "HEAT 1 | ROUND 2" &nbsp; <strong>OFF:</strong> "HEAT 1"<br>
+                        <em>When:</em> Shown when race is staged and during countdown
+                    </div>
+                </div>
+                <div class="checkbox-group">
+                    <label>
+                        <input type="checkbox" id="behavior-position-mode" ${showPositionMode ? 'checked' : ''}>
+                        Show Position in Current Lap
+                    </label>
+                    <div class="checkbox-description">
+                        <strong>Affects:</strong> Current Lap/Position (displayed during race)<br>
+                        <strong>ON:</strong> "POSN: 2ND | LAP: 4" &nbsp; <strong>OFF:</strong> "LAP: 4"<br>
+                        <em>When:</em> Continuously updated during active race
+                    </div>
+                </div>
+                <div class="checkbox-group">
+                    <label>
+                        <input type="checkbox" id="behavior-gap-mode" ${showGapTime ? 'checked' : ''}>
+                        Show Gap Time
+                    </label>
+                    <div class="checkbox-description">
+                        <strong>Affects:</strong> Lap Results (displayed after completing a lap)<br>
+                        <strong>ON:</strong> "GAP: +0:02.3" (gap to leader) &nbsp; <strong>OFF:</strong> "BEST LAP | 0:24.5"<br>
+                        <em>When:</em> Shown briefly after each lap completion
+                    </div>
+                </div>
+                <div class="checkbox-group">
+                    <label>
+                        <input type="checkbox" id="behavior-results-mode" ${showPostRaceResults ? 'checked' : ''}>
+                        Show Post-Race Results
+                    </label>
+                    <div class="checkbox-description">
+                        <strong>Affects:</strong> Results, Lap Times Display (after race finishes)<br>
+                        <strong>ON:</strong> Shows "PLACEMENT: 2" and individual lap times &nbsp; <strong>OFF:</strong> Hidden<br>
+                        <em>When:</em> Displayed when race ends or pilot finishes
+                    </div>
+                </div>
+            `;
+
+            controlsDiv.appendChild(behaviorOptionsDiv);
+
+            // Add event listeners for behavior options
+            document.getElementById('behavior-round-num').addEventListener('change', function(e) {
+                disableUseGlobal();
+                if (currentPilotId === 'global') {
+                    globalConfig._round_num = e.target.checked;
+                } else {
+                    pilotConfig._round_num = e.target.checked;
+                }
+                // Update examples and preview
+                renderElements();
+                initControls();
+                saveConfiguration();
+            });
+            document.getElementById('behavior-position-mode').addEventListener('change', function(e) {
+                disableUseGlobal();
+                if (currentPilotId === 'global') {
+                    globalConfig._position_mode = e.target.checked;
+                } else {
+                    pilotConfig._position_mode = e.target.checked;
+                }
+                // Update examples and preview
+                renderElements();
+                initControls();
+                saveConfiguration();
+            });
+            document.getElementById('behavior-gap-mode').addEventListener('change', function(e) {
+                disableUseGlobal();
+                if (currentPilotId === 'global') {
+                    globalConfig._gap_mode = e.target.checked;
+                } else {
+                    pilotConfig._gap_mode = e.target.checked;
+                }
+                // Update examples and preview
+                renderElements();
+                initControls();
+                saveConfiguration();
+            });
+            document.getElementById('behavior-results-mode').addEventListener('change', function(e) {
+                disableUseGlobal();
+                if (currentPilotId === 'global') {
+                    globalConfig._results_mode = e.target.checked;
+                } else {
+                    pilotConfig._results_mode = e.target.checked;
+                }
+                // Update examples and preview
+                renderElements();
+                initControls();
+                saveConfiguration();
+            });
+
+            elements.forEach(element => {
+                const config = pilotConfig[element.id] || {};
+                const enabled = config.enabled !== undefined ? config.enabled : getDefaultValue(element.id, 'enabled');
+                const row = config.row !== undefined ? config.row : getDefaultValue(element.id, 'row');
+                const alignment = config.alignment || getDefaultValue(element.id, 'alignment');
+                const customCol = config.custom_col !== undefined ? config.custom_col : getDefaultValue(element.id, 'custom_col');
+                const uptime = config.uptime !== undefined ? config.uptime : getDefaultValue(element.id, 'uptime');
+
+                // Determine if element is timed (has uptime > 0) or static (uptime = 0)
+                // Default is based on the current global setting's uptime value
+                const defaultUptime = getDefaultValue(element.id, 'uptime');
+                const isTimed = config.is_timed !== undefined ? config.is_timed : (defaultUptime > 0);
+
+                const controlDiv = document.createElement('div');
+                controlDiv.className = 'element-control';
+                controlDiv.id = 'control-' + element.id;
+
+                // Get message content for elements that have messageKey
+                let messageContent = '';
+                if (element.messageKey) {
+                    const messageValue = (currentPilotId === 'global' ? globalConfig[element.messageKey] : pilotConfig[element.messageKey]) ||
+                        (globalDBSettings.messages && globalDBSettings.messages[element.messageKey]) ||
+                        element.defaultMessage || '';
+                    messageContent = `
+                        <div class="message-input-group">
+                            <label>Message Content:</label>
+                            <div>
+                                <input type="text" id="message-${element.id}" value="${messageValue}" style="width: 100%;">
+                            </div>
+                            <div class="helper-text">lowercase letters are symbols</div>
+                        </div>
+                    `;
+                }
+
+                const exampleText = getExampleText(element);
+                controlDiv.innerHTML = `
+                    <h3 id="heading-${element.id}" style="cursor: pointer;">
+                        <label style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="enabled-${element.id}" ${enabled ? 'checked' : ''} style="width: auto; margin: 0;">
+                            <span>${element.label}</span>
+                        </label>
+                    </h3>
+                    ${element.description ? `<div style="color: #666; font-size: 13px; margin-bottom: 8px;">${element.description}</div>` : ''}
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                        <div id="example-${element.id}" style="color: #888; font-size: 12px; font-style: italic;">
+                            Example: "${exampleText}"
+                        </div>
+                        <button class="btn btn-sm btn-info test-element-btn" data-element-id="${element.id}" ${currentPilotId === 'global' ? 'style="display:none;"' : ''}>Test</button>
+                    </div>
+                    ${messageContent}
+                    <div class="control-group">
+                        <label>Display Mode:</label>
+                        <select id="timed-${element.id}">
+                            <option value="static" ${!isTimed ? 'selected' : ''}>Static (always shown)</option>
+                            <option value="timed" ${isTimed ? 'selected' : ''}>Timed (auto-hide)</option>
+                        </select>
+                    </div>
+                    <div class="control-group" id="uptime-group-${element.id}" style="display: ${isTimed ? 'block' : 'none'};">
+                        <label>Display Duration (decaseconds):</label>
+                        <input type="number" id="uptime-${element.id}" min="1" max="999" value="${uptime || 5}">
+                    </div>
+                    <div class="control-row">
+                        <div class="control-group">
+                            <label>Align:</label>
+                            <select id="align-${element.id}">
+                                <option value="left" ${alignment === 'left' ? 'selected' : ''}>Left</option>
+                                <option value="center" ${alignment === 'center' ? 'selected' : ''}>Center</option>
+                                <option value="right" ${alignment === 'right' ? 'selected' : ''}>Right</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label>Row:</label>
+                            <input type="number" id="row-${element.id}" min="0" max="17" value="${row}">
+                        </div>
+                        <div class="control-group">
+                            <label>Col:</label>
+                            <input type="number" id="col-${element.id}" min="0" max="49" value="${customCol}">
+                        </div>
+                    </div>
+                `;
+
+                controlsDiv.appendChild(controlDiv);
+
+                // Add click handler to heading to scroll to grid element
+                document.getElementById('heading-' + element.id).addEventListener('click', function(e) {
+                    // Don't trigger if clicking on the checkbox
+                    if (e.target.tagName !== 'INPUT') {
+                        const gridElement = document.getElementById('element-' + element.id);
+                        if (gridElement) {
+                            gridElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            // Highlight the grid element briefly
+                            gridElement.style.backgroundColor = 'rgba(255, 200, 100, 0.5)';
+                            setTimeout(() => {
+                                gridElement.style.backgroundColor = '';
+                            }, 1000);
+                        }
+                    }
+                });
+
+                // Add event listeners
+                document.getElementById('enabled-' + element.id).addEventListener('change', updateElementFromControls);
+                document.getElementById('timed-' + element.id).addEventListener('change', function(event) {
+                    const isTimed = event.target.value === 'timed';
+                    const uptimeGroup = document.getElementById('uptime-group-' + element.id);
+                    uptimeGroup.style.display = isTimed ? 'block' : 'none';
+                    updateElementFromControls(event);
+                });
+                document.getElementById('row-' + element.id).addEventListener('change', updateElementFromControls);
+                document.getElementById('align-' + element.id).addEventListener('change', updateElementFromControls);
+                document.getElementById('col-' + element.id).addEventListener('change', updateElementFromControls);
+                document.getElementById('uptime-' + element.id).addEventListener('change', updateElementFromControls);
+
+                // Add event listener for message content if element has messageKey
+                if (element.messageKey) {
+                    document.getElementById('message-' + element.id).addEventListener('change', function(event) {
+                        disableUseGlobal();
+                        if (currentPilotId === 'global') {
+                            globalConfig[element.messageKey] = event.target.value;
+                        } else {
+                            pilotConfig[element.messageKey] = event.target.value;
+                        }
+                        saveConfiguration();
+                    });
+                }
+            });
+        }
+
+        // Update element position from controls
+        function updateElementFromControls(event) {
+            const parts = event.target.id.split('-');
+            const type = parts[0];
+            const elementId = parts.slice(1).join('-');
+
+            if (!pilotConfig[elementId]) {
+                pilotConfig[elementId] = {};
+            }
+
+            if (type === 'enabled') {
+                pilotConfig[elementId].enabled = event.target.checked;
+            } else if (type === 'row') {
+                pilotConfig[elementId].row = parseInt(event.target.value);
+            } else if (type === 'align') {
+                pilotConfig[elementId].alignment = event.target.value;
+            } else if (type === 'col') {
+                pilotConfig[elementId].custom_col = parseInt(event.target.value);
+            } else if (type === 'uptime') {
+                pilotConfig[elementId].uptime = parseInt(event.target.value);
+            } else if (type === 'timed') {
+                pilotConfig[elementId].is_timed = event.target.value === 'timed';
+                // If switching to static, set uptime to 0
+                if (!pilotConfig[elementId].is_timed) {
+                    pilotConfig[elementId].uptime = 0;
+                } else {
+                    // If switching to timed, set a default uptime if it's 0
+                    if (!pilotConfig[elementId].uptime || pilotConfig[elementId].uptime === 0) {
+                        pilotConfig[elementId].uptime = 5;
+                        document.getElementById('uptime-' + elementId).value = 5;
+                    }
+                }
+            }
+
+            // Disable use global checkbox if this is a pilot config change
+            disableUseGlobal();
+
+            renderElements();
+
+            // Auto-save the configuration
+            saveConfiguration();
+        }
+
+        // Drag handlers
+        function startDrag(event) {
+            event.preventDefault();
+            draggingElement = event.target;
+            hasDragged = false; // Reset flag at start
+            draggingElement.classList.add('dragging');
+
+            const rect = draggingElement.getBoundingClientRect();
+            dragOffsetX = event.clientX - rect.left;
+            dragOffsetY = event.clientY - rect.top;
+
+            document.addEventListener('mousemove', drag);
+            document.addEventListener('mouseup', stopDrag);
+        }
+
+        function drag(event) {
+            if (!draggingElement) return;
+
+            hasDragged = true; // Mark that actual dragging occurred
+
+            const grid = document.getElementById('osdGrid');
+            const gridRect = grid.getBoundingClientRect();
+
+            let x = event.clientX - gridRect.left - dragOffsetX;
+            let y = event.clientY - gridRect.top - dragOffsetY;
+
+            // Snap to grid
+            let col = Math.round((x - 10) / CELL_WIDTH);
+            const row = Math.round((y - 10) / CELL_HEIGHT);
+
+            // Constrain column based on alignment to prevent snap-back
+            const elementId = draggingElement.dataset.elementId;
+            if (elementId && pilotConfig[elementId]) {
+                const currentAlignment = pilotConfig[elementId].alignment || getDefaultValue(elementId, 'alignment');
+                const element = elements.find(el => el.id === elementId);
+                const exampleText = element ? element.example : '';
+                const textLength = getVisibleTextLength(exampleText);
+
+                // Calculate maximum left column based on alignment
+                let maxLeftCol;
+                if (currentAlignment === 'right') {
+                    // For right alignment: right edge can't exceed column 49
+                    // If right edge = leftCol + textLength - 1, then max leftCol = 49 - textLength + 1
+                    maxLeftCol = OSD_COLS - textLength;
+                } else if (currentAlignment === 'center') {
+                    // For center alignment: center can't exceed column 49
+                    // If center = leftCol + floor(textLength / 2), then max leftCol = 49 - floor(textLength / 2)
+                    maxLeftCol = OSD_COLS - 1 - Math.floor(textLength / 2);
+                } else {
+                    // For left alignment: left edge can go to column 49
+                    maxLeftCol = OSD_COLS - 1;
+                }
+
+                // Clamp column to valid range
+                col = Math.max(0, Math.min(col, maxLeftCol));
+            }
+
+            // Only restrict row to valid range
+            if (row >= 0 && row < OSD_ROWS) {
+                draggingElement.style.left = (col * CELL_WIDTH + 10) + 'px';
+                draggingElement.style.top = (row * CELL_HEIGHT + 10) + 'px';
+            }
+        }
+
+        async function stopDrag(event) {
+            if (!draggingElement) return;
+
+            const elementId = draggingElement.dataset.elementId;
+            draggingElement.classList.remove('dragging');
+
+            // Get dropped position (where left edge ended up)
+            const leftX = parseInt(draggingElement.style.left) - 10;
+            const y = parseInt(draggingElement.style.top) - 10;
+
+            const leftCol = Math.round(leftX / CELL_WIDTH);
+            const row = Math.round(y / CELL_HEIGHT);
+
+            if (!pilotConfig[elementId]) {
+                pilotConfig[elementId] = {};
+            }
+
+            // Get current alignment and element details
+            const currentAlignment = pilotConfig[elementId].alignment || getDefaultValue(elementId, 'alignment');
+            const element = elements.find(el => el.id === elementId);
+            const exampleText = element ? element.example : '';
+            const textLength = getVisibleTextLength(exampleText);
+
+            // Calculate the alignment point based on where element was dropped
+            // The alignment point is what we store - its meaning depends on alignment type
+            let alignmentPoint;
+
+            if (currentAlignment === 'left') {
+                // For left alignment: alignment point = left edge position
+                alignmentPoint = leftCol;
+                console.log(`[stopDrag] Left-aligned: left edge at col=${leftCol}, storing alignment point=${alignmentPoint}`);
+            } else if (currentAlignment === 'right') {
+                // For right alignment: alignment point = right edge position
+                // We dropped the left edge at leftCol, so right edge is at leftCol + textLength - 1
+                alignmentPoint = leftCol + textLength - 1;
+                console.log(`[stopDrag] Right-aligned: leftCol=${leftCol}, textLength=${textLength}, alignment point (right edge)=${alignmentPoint}`);
+            } else if (currentAlignment === 'center') {
+                // For center alignment: alignment point = center position
+                // We dropped the left edge at leftCol, so center is at leftCol + floor(textLength / 2)
+                alignmentPoint = leftCol + Math.floor(textLength / 2);
+                console.log(`[stopDrag] Center-aligned: leftCol=${leftCol}, textLength=${textLength}, alignment point (center)=${alignmentPoint}`);
+            } else {
+                // Fallback for any other alignment (backward compatibility)
+                alignmentPoint = leftCol;
+                console.log(`[stopDrag] Unknown alignment '${currentAlignment}', treating as left-aligned`);
+            }
+
+            // Clamp alignment point to valid column range (0-49)
+            alignmentPoint = Math.max(0, Math.min(alignmentPoint, OSD_COLS - 1));
+            console.log(`[stopDrag] Clamped alignment point to ${alignmentPoint}`);
+
+            // Call backend API to get the correct left column position
+            try {
+                const response = await fetch('/elrs_osd_config/api/calculate_column', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        text: exampleText,
+                        alignment: currentAlignment,
+                        row: row,
+                        column: alignmentPoint
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Store the configuration with the alignment point
+                    pilotConfig[elementId].row = row;
+                    pilotConfig[elementId].alignment = currentAlignment;
+                    pilotConfig[elementId].custom_col = alignmentPoint;
+
+                    // Update controls
+                    document.getElementById('row-' + elementId).value = row;
+                    document.getElementById('align-' + elementId).value = currentAlignment;
+                    document.getElementById('col-' + elementId).value = alignmentPoint;
+
+                    console.log(`[stopDrag] API returned: left_column=${result.left_column}, row=${result.row}, stored alignment point=${alignmentPoint}`);
+
+                    // Re-render to show correct position
+                    renderElements();
+
+                    // Disable use global checkbox and save
+                    disableUseGlobal();
+                    saveConfiguration();
+                } else {
+                    console.error('API error:', result.error);
+                }
+            } catch (error) {
+                console.error('Failed to call API:', error);
+            }
+
+            draggingElement = null;
+            document.removeEventListener('mousemove', drag);
+            document.removeEventListener('mouseup', stopDrag);
+        }
+
+        // Load pilot configuration
+        async function loadPilotConfig(pilotId) {
+            const useGlobalContainer = document.getElementById('useGlobalContainer');
+            const useGlobalCheckbox = document.getElementById('useGlobalCheckbox');
+
+            if (!pilotId) {
+                pilotConfig = {};
+                useGlobalContainer.style.display = 'none';
+                renderElements();
+                initControls();
+                return;
+            }
+
+            currentPilotId = pilotId;
+
+            // Handle global configuration selection
+            if (pilotId === 'global') {
+                useGlobalContainer.style.display = 'none';
+                try {
+                    const response = await fetch(`/elrs_osd_config/api/global`);
+                    const data = await response.json();
+                    globalConfig = data.config || {};
+                    pilotConfig = globalConfig;
+                    renderElements();
+                    initControls();
+                    updateControlsState();
+                } catch (error) {
+                    console.error('Error loading global config:', error);
+                    globalConfig = {};
+                    pilotConfig = {};
+                    renderElements();
+                    initControls();
+                    updateControlsState();
+                }
+                return;
+            }
+
+            // Handle per-pilot configuration
+            useGlobalContainer.style.display = 'block';
+
+            try {
+                const response = await fetch(`/elrs_osd_config/api/pilot/${pilotId}`);
+                const data = await response.json();
+                pilotConfig = data.config || {};
+
+                // Check if pilot is using global config
+                useGlobal = pilotConfig.use_global !== undefined ? pilotConfig.use_global : true;
+                useGlobalCheckbox.checked = useGlobal;
+
+                // If using global, load global config for display
+                if (useGlobal) {
+                    const globalResponse = await fetch(`/elrs_osd_config/api/global`);
+                    const globalData = await globalResponse.json();
+                    globalConfig = globalData.config || {};
+                    pilotConfig = {...globalConfig}; // Use global for display
+                }
+
+                // Load pilot UID
+                await loadPilotUid(pilotId);
+
+                renderElements();
+                initControls();
+                updateControlsState();
+            } catch (error) {
+                console.error('Error loading pilot config:', error);
+                pilotConfig = {};
+                useGlobal = true;
+                useGlobalCheckbox.checked = true;
+                renderElements();
+                initControls();
+                updateControlsState();
+            }
+        }
+
+        // Helper function to disable "Use Global Configuration" when pilot settings change
+        function disableUseGlobal() {
+            if (currentPilotId !== 'global') {
+                const useGlobalCheckbox = document.getElementById('useGlobalCheckbox');
+                if (useGlobalCheckbox.checked) {
+                    useGlobalCheckbox.checked = false;
+                    useGlobal = false;
+                    updateControlsState();
+                }
+            }
+        }
+
+        // Update controls state based on useGlobal flag
+        function updateControlsState() {
+            const useGlobalCheckbox = document.getElementById('useGlobalCheckbox');
+            const isGlobal = currentPilotId === 'global';
+            const readOnly = !isGlobal && useGlobalCheckbox.checked;
+
+            // Show/hide Clear Screen button (only show for pilots, not global)
+            const clearScreenBtn = document.getElementById('clearScreenBtn');
+            if (isGlobal) {
+                clearScreenBtn.style.display = 'none';
+            } else {
+                clearScreenBtn.style.display = 'inline-block';
+            }
+
+            // Show/hide Test buttons (only show for pilots, not global)
+            document.querySelectorAll('.test-element-btn').forEach(btn => {
+                if (isGlobal) {
+                    btn.style.display = 'none';
+                } else {
+                    btn.style.display = 'inline-block';
+                }
+            });
+
+            // Show/hide UID container (only show for pilots, not global)
+            const uidContainer = document.getElementById('uidContainer');
+            if (uidContainer) {
+                if (isGlobal) {
+                    uidContainer.style.display = 'none';
+                } else {
+                    uidContainer.style.display = 'block';
+                }
+            }
+
+            // Disable/enable all element controls
+            document.querySelectorAll('.element-control input, .element-control select').forEach(el => {
+                el.disabled = readOnly;
+            });
+
+            // Disable/enable behavior option checkboxes
+            document.querySelectorAll('#behavior-options input[type="checkbox"]').forEach(el => {
+                el.disabled = readOnly;
+            });
+
+            // Disable/enable reset button
+            document.getElementById('resetBtn').disabled = readOnly;
+
+            // Update dragging capability
+            document.querySelectorAll('.osd-element').forEach(el => {
+                if (readOnly) {
+                    el.style.cursor = 'default';
+                } else {
+                    el.style.cursor = 'move';
+                }
+            });
+        }
+
+        // Save configuration
+        async function saveConfiguration() {
+            if (!currentPilotId) {
+                showToast('Please select a pilot or global configuration first', 'warning');
+                return;
+            }
+
+            const useGlobalCheckbox = document.getElementById('useGlobalCheckbox');
+            const isGlobal = currentPilotId === 'global';
+
+            try {
+                let url, configToSave;
+
+                if (isGlobal) {
+                    url = `/elrs_osd_config/api/global`;
+                    // Combine pilotConfig and globalConfig (which includes behavior options and messages)
+                    configToSave = { ...pilotConfig, ...globalConfig };
+                } else {
+                    url = `/elrs_osd_config/api/pilot/${currentPilotId}`;
+                    // Include use_global flag in pilot config
+                    configToSave = {
+                        ...pilotConfig,
+                        use_global: useGlobalCheckbox.checked
+                    };
+                }
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ config: configToSave })
+                });
+
+                const result = await response.json();
+
+                if (!result.success) {
+                    showToast('Error saving configuration: ' + (result.error || 'Unknown error'), 'warning');
+                }
+            } catch (error) {
+                console.error('Error saving config:', error);
+                showToast('Error saving configuration', 'warning');
+            }
+        }
+
+        // Reset to defaults
+        async function resetConfiguration() {
+            const isGlobal = currentPilotId === 'global';
+
+            if (isGlobal) {
+                // For global config, reset to database defaults
+                pilotConfig = {};
+                renderElements();
+                initControls();
+                showToast('Global configuration reset to defaults', 'success');
+                return;
+            }
+
+            // For per-pilot config, delete custom settings and enable "Use Global"
+            try {
+                const response = await fetch(`/elrs_osd_config/api/pilot/${currentPilotId}`, {
+                    method: 'DELETE'
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Clear pilot config
+                    pilotConfig = {};
+
+                    // Enable "Use Global Configuration" checkbox
+                    const useGlobalCheckbox = document.getElementById('useGlobalCheckbox');
+                    useGlobalCheckbox.checked = true;
+                    useGlobal = true;
+
+                    // Load and display global config
+                    try {
+                        const globalResponse = await fetch(`/elrs_osd_config/api/global`);
+                        const globalData = await globalResponse.json();
+                        globalConfig = globalData.config || {};
+                        pilotConfig = {...globalConfig};
+                    } catch (error) {
+                        console.error('Error loading global config:', error);
+                    }
+
+                    renderElements();
+                    initControls();
+                    updateControlsState();
+
+                    showToast('Pilot settings reset to global defaults', 'success');
+                } else {
+                    showToast('Error resetting configuration: ' + (result.error || 'Unknown error'), 'warning');
+                }
+            } catch (error) {
+                console.error('Error resetting config:', error);
+                showToast('Error resetting configuration', 'warning');
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            initGrid();
+            renderElements();
+            initControls();
+
+            // Load global configuration on page load
+            loadPilotConfig('global');
+
+            document.getElementById('pilotSelect').addEventListener('change', function(e) {
+                loadPilotConfig(e.target.value);
+            });
+
+            document.getElementById('useGlobalCheckbox').addEventListener('change', async function(e) {
+                useGlobal = e.target.checked;
+                if (useGlobal && currentPilotId !== 'global') {
+                    // Load global config and reset pilot to match
+                    try {
+                        const response = await fetch(`/elrs_osd_config/api/global`);
+                        const data = await response.json();
+                        globalConfig = data.config || {};
+                        // Reset pilot config to match global
+                        pilotConfig = {...globalConfig};
+                        renderElements();
+                        initControls();
+                        // Save the reset pilot config
+                        await saveConfiguration();
+                    } catch (error) {
+                        console.error('Error loading global config:', error);
+                    }
+                } else if (!useGlobal && currentPilotId !== 'global') {
+                    // Save the current state when unchecking
+                    await saveConfiguration();
+                }
+                updateControlsState();
+            });
+
+            document.getElementById('resetBtn').addEventListener('click', resetConfiguration);
+
+            // Clear Screen button handler
+            document.getElementById('clearScreenBtn').addEventListener('click', async function() {
+                if (currentPilotId === 'global') {
+                    showToast('Cannot clear screen for global configuration', 'warning');
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`/elrs_osd_config/api/pilot/${currentPilotId}/clear`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    });
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                        showToast('Pilot screen cleared successfully', 'success');
+                    } else {
+                        showToast('Error clearing screen: ' + (result.error || 'Unknown error'), 'warning');
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    showToast('Error clearing screen: ' + error.message, 'warning');
+                }
+            });
+
+            // Test Element button handlers (using event delegation)
+            document.addEventListener('click', async function(event) {
+                if (event.target.classList.contains('test-element-btn')) {
+                    if (currentPilotId === 'global') {
+                        showToast('Cannot test elements for global configuration', 'warning');
+                        return;
+                    }
+
+                    const elementId = event.target.dataset.elementId;
+
+                    try {
+                        // Call the new endpoint that uses actual OSD element formatting
+                        const response = await fetch(`/elrs_osd_config/api/pilot/${currentPilotId}/test_element/${elementId}`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            }
+                        });
+
+                        const result = await response.json();
+
+                        if (!result.success) {
+                            showToast('Error sending test: ' + (result.error || 'Unknown error'), 'warning');
+                        } else {
+                            console.log(`Test sent for ${elementId}:`, result.messages);
+                            showToast('Test sent successfully', 'success');
+                        }
+                    } catch (error) {
+                        console.error('Error:', error);
+                        showToast('Error sending test: ' + error.message, 'warning');
+                    }
+                }
+            });
+        });
+
+        // Load pilot UID helper function
+        async function loadPilotUid(pilotId) {
+            try {
+                const response = await fetch(`/elrs_osd_config/api/pilot/${pilotId}/uid`);
+                const result = await response.json();
+
+                if (result.success) {
+                    const uidInput = document.getElementById('pilotUidInput');
+                    uidInput.value = result.uid || '';
+                }
+            } catch (error) {
+                console.error('Error loading pilot UID:', error);
+            }
+        }
+
+        // Global click handler to show toast for disabled controls
+        document.addEventListener('click', function(event) {
+            // Check if "Use Global Configuration" is checked
+            const useGlobalCheckbox = document.getElementById('useGlobalCheckbox');
+            if (!useGlobalCheckbox || !useGlobalCheckbox.checked) {
+                return; // Not in read-only mode
+            }
+
+            // Check if click was on or within a disabled control
+            const target = event.target;
+            const control = target.closest('.element-control input, .element-control select, #behavior-options input');
+
+            if (control && control.disabled) {
+                event.preventDefault();
+                event.stopPropagation();
+                showToast('Disable "Use Global Configuration" to edit pilot settings');
+                return false;
+            }
+        }, true); // Use capture phase to intercept early
+
+        // Auto-save UID input handler (debounced)
+        let uidSaveTimeout;
+        document.getElementById('pilotUidInput').addEventListener('input', function() {
+            if (currentPilotId === 'global') {
+                return;
+            }
+
+            // Debounce: wait 1 second after user stops typing before saving
+            clearTimeout(uidSaveTimeout);
+            uidSaveTimeout = setTimeout(async function() {
+                const uidInput = document.getElementById('pilotUidInput');
+                const uid = uidInput.value.trim();
+
+                try {
+                    const response = await fetch(`/elrs_osd_config/api/pilot/${currentPilotId}/uid`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            uid: uid
+                        })
+                    });
+
+                    const result = await response.json();
+
+                    if (!result.success) {
+                        showToast('Error saving UID: ' + (result.error || 'Unknown error'), 'warning');
+                    }
+                    // Don't show toast on success - silent save as requested
+                } catch (error) {
+                    console.error('Error:', error);
+                    showToast('Error saving UID: ' + error.message, 'warning');
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

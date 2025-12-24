@@ -1,4 +1,5 @@
 import logging
+import json
 
 import RHAPI
 from eventmanager import Evt
@@ -6,6 +7,7 @@ from RHUI import UIField, UIFieldSelectOption, UIFieldType
 
 from .connections import ConnectionTypeEnum
 from .elrs_backpack import ELRSBackpack
+from .osd_config_routes import initialize_routes
 
 logger = logging.getLogger(__name__)
 
@@ -14,11 +16,120 @@ def initialize(rhapi: RHAPI.RHAPI):
 
     controller = ELRSBackpack("elrs", "ELRS", rhapi)
 
+    # Define alignment options for SELECT dropdowns
+    alignment_opts = [
+        UIFieldSelectOption(value="left", label="Left"),
+        UIFieldSelectOption(value="center", label="Center"),
+        UIFieldSelectOption(value="right", label="Right")
+    ]
+
+    # Event handler to sync main settings changes back to global config
+    def sync_main_settings_to_global(args):
+        """Sync changes from main ELRS Backpack OSD Settings to global config"""
+        option_name = args.get('option')
+
+        # List of OSD-related option names we care about
+        osd_options = [
+            '_heatname_row', '_heatname_align', '_heatname_custom_col', '_heat_name',
+            '_classname_row', '_classname_align', '_classname_custom_col', '_class_name',
+            '_eventname_row', '_eventname_align', '_eventname_custom_col', '_event_name',
+            '_status_row', '_racestage_align', '_racestage_custom_col',
+            '_racestart_align', '_racestart_custom_col',
+            '_racefinish_align', '_racefinish_custom_col',
+            '_racestop_align', '_racestop_custom_col',
+            '_currentlap_row', '_currentlap_align', '_currentlap_custom_col', '_position_mode',
+            '_lapresults_row', '_lapresults_align', '_lapresults_custom_col',
+            '_announcement_row', '_announcement_align', '_announcement_custom_col',
+            '_leader_align', '_leader_custom_col',
+            '_results_row', '_placement_align', '_placement_custom_col', '_post_results',
+            '_laptimes_row', '_laptimes_align', '_laptimes_custom_col', '_show_laptimes'
+        ]
+
+        # Only sync if an OSD-related option was changed
+        if option_name in osd_options:
+            try:
+                # Get or create global config
+                config_json = rhapi.db.option('elrs_global_osd_config')
+                if config_json:
+                    global_config = json.loads(config_json)
+                else:
+                    global_config = {}
+
+                # Map option names to element IDs and setting keys
+                option_to_element = {
+                    '_heatname_row': ('heat_name', 'row'),
+                    '_heatname_align': ('heat_name', 'alignment'),
+                    '_heatname_custom_col': ('heat_name', 'custom_col'),
+                    '_heat_name': ('heat_name', 'enabled'),
+                    '_classname_row': ('class_name', 'row'),
+                    '_classname_align': ('class_name', 'alignment'),
+                    '_classname_custom_col': ('class_name', 'custom_col'),
+                    '_class_name': ('class_name', 'enabled'),
+                    '_eventname_row': ('event_name', 'row'),
+                    '_eventname_align': ('event_name', 'alignment'),
+                    '_eventname_custom_col': ('event_name', 'custom_col'),
+                    '_event_name': ('event_name', 'enabled'),
+                    '_status_row': ('race_stage', 'row'),  # Also affects race_start, race_finish, race_stop, leader
+                    '_racestage_align': ('race_stage', 'alignment'),
+                    '_racestage_custom_col': ('race_stage', 'custom_col'),
+                    '_racestart_align': ('race_start', 'alignment'),
+                    '_racestart_custom_col': ('race_start', 'custom_col'),
+                    '_racefinish_align': ('race_finish', 'alignment'),
+                    '_racefinish_custom_col': ('race_finish', 'custom_col'),
+                    '_racestop_align': ('race_stop', 'alignment'),
+                    '_racestop_custom_col': ('race_stop', 'custom_col'),
+                    '_currentlap_row': ('current_lap', 'row'),
+                    '_currentlap_align': ('current_lap', 'alignment'),
+                    '_currentlap_custom_col': ('current_lap', 'custom_col'),
+                    '_position_mode': ('current_lap', 'enabled'),
+                    '_lapresults_row': ('lap_results', 'row'),
+                    '_lapresults_align': ('lap_results', 'alignment'),
+                    '_lapresults_custom_col': ('lap_results', 'custom_col'),
+                    '_announcement_row': ('announcement', 'row'),
+                    '_announcement_align': ('announcement', 'alignment'),
+                    '_announcement_custom_col': ('announcement', 'custom_col'),
+                    '_leader_align': ('leader', 'alignment'),
+                    '_leader_custom_col': ('leader', 'custom_col'),
+                    '_results_row': ('results', 'row'),
+                    '_placement_align': ('results', 'alignment'),
+                    '_placement_custom_col': ('results', 'custom_col'),
+                    '_post_results': ('results', 'enabled'),
+                    '_laptimes_row': ('lap_times', 'row'),
+                    '_laptimes_align': ('lap_times', 'alignment'),
+                    '_laptimes_custom_col': ('lap_times', 'custom_col'),
+                    '_show_laptimes': ('lap_times', 'enabled')
+                }
+
+                if option_name in option_to_element:
+                    element_id, setting_key = option_to_element[option_name]
+                    value = args.get('value')
+
+                    # Ensure element exists in global config
+                    if element_id not in global_config:
+                        global_config[element_id] = {}
+
+                    # Update the setting
+                    global_config[element_id][setting_key] = value
+
+                    # Special handling for _status_row - update all status elements
+                    if option_name == '_status_row':
+                        for status_element in ['race_stage', 'race_start', 'race_finish', 'race_stop', 'leader']:
+                            if status_element not in global_config:
+                                global_config[status_element] = {}
+                            global_config[status_element]['row'] = value
+
+                    # Save updated global config
+                    rhapi.db.option_set('elrs_global_osd_config', json.dumps(global_config))
+                    logger.info(f"Synced {option_name} to global OSD config")
+            except Exception as e:
+                logger.error(f"Error syncing option {option_name} to global config: {e}")
+
     rhapi.events.on(Evt.VRX_INITIALIZE, controller.register_handlers)
     rhapi.events.on(Evt.PILOT_ALTER, controller.pilot_alter)
     rhapi.events.on(
         Evt.STARTUP, controller.start_recieve_loop, name="start_recieve_loop"
     )
+    rhapi.events.on(Evt.OPTION_SET, sync_main_settings_to_global)
     rhapi.events.on(Evt.STARTUP, controller.start_connection, name="start_connection")
 
     #
@@ -38,7 +149,13 @@ def initialize(rhapi: RHAPI.RHAPI):
     )
 
     rhapi.ui.register_panel(
-        "elrs_vrxc", "ELRS Backpack OSD Settings", "settings", order=0
+        "elrs_osd_config_link", "ELRS Backpack OSD Settings", "settings", order=0
+    )
+
+    rhapi.ui.register_markdown(
+        "elrs_osd_config_link",
+        "osd_config_link_button",
+        '<p>Configure OSD element positions globally and individually for each pilot.</p><a href="/elrs_osd_config" target="_blank" class="btn btn-primary">Open OSD Configuration Page</a>'
     )
 
     #
@@ -93,231 +210,8 @@ def initialize(rhapi: RHAPI.RHAPI):
     )
     rhapi.fields.register_option(_conn_opt, "elrs_settings")
 
-    _heat_name = UIField(
-        "_heat_name",
-        "Show Heat Name",
-        desc="Show the heat's name on start",
-        field_type=UIFieldType.CHECKBOX,
-    )
-    rhapi.fields.register_option(_heat_name, "elrs_vrxc")
-
-    _round_num = UIField(
-        "_round_num",
-        "Show Round Number",
-        desc="Show round number on start",
-        field_type=UIFieldType.CHECKBOX,
-    )
-    rhapi.fields.register_option(_round_num, "elrs_vrxc")
-
-    _class_name = UIField(
-        "_class_name",
-        "Show Class Name",
-        desc="Show the class's name on start",
-        field_type=UIFieldType.CHECKBOX,
-    )
-    rhapi.fields.register_option(_class_name, "elrs_vrxc")
-
-    _event_name = UIField(
-        "_event_name",
-        "Show Event Name",
-        desc="Show the event's name on start",
-        field_type=UIFieldType.CHECKBOX,
-    )
-    rhapi.fields.register_option(_event_name, "elrs_vrxc")
-
-    _position_mode = UIField(
-        "_position_mode",
-        "Show Current Position and Lap",
-        desc="off - only shows current lap",
-        field_type=UIFieldType.CHECKBOX,
-    )
-    rhapi.fields.register_option(_position_mode, "elrs_vrxc")
-
-    _gap_mode = UIField(
-        "_gap_mode",
-        "Show Gap Time",
-        desc="off - shows lap time",
-        field_type=UIFieldType.CHECKBOX,
-    )
-    rhapi.fields.register_option(_gap_mode, "elrs_vrxc")
-
-    _results_mode = UIField(
-        "_results_mode",
-        "Show Post-Race Results",
-        desc="Show pilot's results upon race completion",
-        field_type=UIFieldType.CHECKBOX,
-    )
-    rhapi.fields.register_option(_results_mode, "elrs_vrxc")
-
-    #
-    # Text Fields
-    #
-
-    _racestage_message = UIField(
-        "_racestage_message",
-        "Race Stage Message",
-        desc="lowercase letters are symbols",
-        field_type=UIFieldType.TEXT,
-        value="w ARM NOW x",
-    )
-    rhapi.fields.register_option(_racestage_message, "elrs_vrxc")
-
-    _racestart_message = UIField(
-        "_racestart_message",
-        "Race Start Message",
-        desc="lowercase letters are symbols",
-        field_type=UIFieldType.TEXT,
-        value="w   GO!   x",
-    )
-    rhapi.fields.register_option(_racestart_message, "elrs_vrxc")
-
-    _pilotdone_message = UIField(
-        "_pilotdone_message",
-        "Pilot Done Message",
-        desc="lowercase letters are symbols",
-        field_type=UIFieldType.TEXT,
-        value="w FINISHED! x",
-    )
-    rhapi.fields.register_option(_pilotdone_message, "elrs_vrxc")
-
-    _racefinish_message = UIField(
-        "_racefinish_message",
-        "Race Finish Message",
-        desc="lowercase letters are symbols",
-        field_type=UIFieldType.TEXT,
-        value="w FINISH LAP! x",
-    )
-    rhapi.fields.register_option(_racefinish_message, "elrs_vrxc")
-
-    _racestop_message = UIField(
-        "_racestop_message",
-        "Race Stop Message",
-        desc="lowercase letters are symbols",
-        field_type=UIFieldType.TEXT,
-        value="w  LAND NOW!  x",
-    )
-    rhapi.fields.register_option(_racestop_message, "elrs_vrxc")
-
-    _leader_message = UIField(
-        "_leader_message",
-        "Race Leader Message",
-        desc="lowercase letters are symbols",
-        field_type=UIFieldType.TEXT,
-        value="RACE LEADER",
-    )
-    rhapi.fields.register_option(_leader_message, "elrs_vrxc")
-
-    #
-    # Basic Integers
-    #
-
-    _racestart_uptime = UIField(
-        "_racestart_uptime",
-        "Start Message Uptime",
-        desc="decaseconds",
-        field_type=UIFieldType.BASIC_INT,
-        value=5,
-    )
-    rhapi.fields.register_option(_racestart_uptime, "elrs_vrxc")
-
-    _finish_uptime = UIField(
-        "_finish_uptime",
-        "Finish Message Uptime",
-        desc="decaseconds",
-        field_type=UIFieldType.BASIC_INT,
-        value=20,
-    )
-    rhapi.fields.register_option(_finish_uptime, "elrs_vrxc")
-
-    _results_uptime = UIField(
-        "_results_uptime",
-        "Lap Result Uptime",
-        desc="decaseconds",
-        field_type=UIFieldType.BASIC_INT,
-        value=40,
-    )
-    rhapi.fields.register_option(_results_uptime, "elrs_vrxc")
-
-    _announcement_uptime = UIField(
-        "_announcement_uptime",
-        "Announcement Uptime",
-        desc="decaseconds",
-        field_type=UIFieldType.BASIC_INT,
-        value=50,
-    )
-    rhapi.fields.register_option(_announcement_uptime, "elrs_vrxc")
-
-    _heatname_row = UIField(
-        "_heatname_row",
-        "Heat Name Row",
-        desc="Use rows between 0-17",
-        field_type=UIFieldType.BASIC_INT,
-        value=2,
-    )
-    rhapi.fields.register_option(_heatname_row, "elrs_vrxc")
-
-    _classname_row = UIField(
-        "_classname_row",
-        "Class Name Row",
-        desc="Use rows between 0-17",
-        field_type=UIFieldType.BASIC_INT,
-        value=1,
-    )
-    rhapi.fields.register_option(_classname_row, "elrs_vrxc")
-
-    _eventname_row = UIField(
-        "_eventname_row",
-        "Event Name Row",
-        desc="Use rows between 0-17",
-        field_type=UIFieldType.BASIC_INT,
-        value=0,
-    )
-    rhapi.fields.register_option(_eventname_row, "elrs_vrxc")
-
-    _announcement_row = UIField(
-        "_announcement_row",
-        "Announcement Row",
-        desc="Use rows between 0-17",
-        field_type=UIFieldType.BASIC_INT,
-        value=3,
-    )
-    rhapi.fields.register_option(_announcement_row, "elrs_vrxc")
-
-    _status_row = UIField(
-        "_status_row",
-        "Race Status Row",
-        desc="Use rows between 0-17",
-        field_type=UIFieldType.BASIC_INT,
-        value=5,
-    )
-    rhapi.fields.register_option(_status_row, "elrs_vrxc")
-
-    _currentlap_row = UIField(
-        "_currentlap_row",
-        "Current Lap/Position Row",
-        desc="Use rows between 0-17",
-        field_type=UIFieldType.BASIC_INT,
-        value=0,
-    )
-    rhapi.fields.register_option(_currentlap_row, "elrs_vrxc")
-
-    _lapresults_row = UIField(
-        "_lapresults_row",
-        "Lap/Gap Results Row",
-        desc="Use rows between 0-17",
-        field_type=UIFieldType.BASIC_INT,
-        value=15,
-    )
-    rhapi.fields.register_option(_lapresults_row, "elrs_vrxc")
-
-    _results_row = UIField(
-        "_results_row",
-        "Results Rows",
-        desc="Use rows between 0-16. Uses two rows.",
-        field_type=UIFieldType.BASIC_INT,
-        value=13,
-    )
-    rhapi.fields.register_option(_results_row, "elrs_vrxc")
+    # Note: OSD configuration options are now managed through the OSD Configuration Page
+    # The database options are still created by the backend, but not displayed in the old UI
 
     #
     # Quick Buttons
@@ -348,3 +242,24 @@ def initialize(rhapi: RHAPI.RHAPI):
     rhapi.ui.register_quickbutton(
         "elrs_settings", "enable_wifi", "Start Backpack WiFi", controller.activate_wifi
     )
+
+    #
+    # Register OSD Configuration Storage
+    #
+    osd_config_field = UIField(
+        "elrs_osd_config",
+        "OSD Configuration (JSON)",
+        field_type=UIFieldType.TEXT,
+        private=True
+    )
+    rhapi.fields.register_pilot_attribute(osd_config_field)
+
+    #
+    # Register Flask Blueprint for OSD Configuration Page
+    #
+    try:
+        blueprint = initialize_routes(rhapi, controller)
+        rhapi.ui.blueprint_add(blueprint)
+        logger.info("ELRS OSD Configuration page registered at /elrs_osd_config")
+    except Exception as e:
+        logger.error(f"Failed to register OSD configuration page: {e}")

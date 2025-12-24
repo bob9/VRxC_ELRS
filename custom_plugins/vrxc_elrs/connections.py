@@ -69,8 +69,13 @@ class SerialConnection:
         logger.info("Attempting to find backpack")
 
         avaliable_port = {port.device for port in serial.tools.list_ports.comports()}
+        search_ports = avaliable_port - AVOIDED_PORTS
 
-        for port in avaliable_port - AVOIDED_PORTS:
+        logger.info(f"Available serial ports: {avaliable_port}")
+        logger.info(f"Searching for backpack on ports: {search_ports}")
+
+        for port in search_ports:
+            logger.info(f"Trying to connect to backpack on port: {port}")
 
             try:
                 connection = serial.Serial(
@@ -84,9 +89,9 @@ class SerialConnection:
                     rtscts=0,
                     write_timeout=5,
                 )
-            except:
+            except Exception as ex:
                 logger.warning(
-                    "Failed to open serial device. Attempting to connect to new device..."
+                    f"Failed to open serial device on port {port}: {ex}. Attempting to connect to new device..."
                 )
                 continue
 
@@ -98,9 +103,9 @@ class SerialConnection:
 
             try:
                 connection.write(packet.get_packet())
-            except:
+            except Exception as ex:
                 logger.error(
-                    "Failed to write to open serial device. Attempting to connect to new device..."
+                    f"Failed to write to serial device on port {port}: {ex}. Attempting to connect to new device..."
                 )
                 connection.close()
                 continue
@@ -118,9 +123,14 @@ class SerialConnection:
                     break
 
             if self._connected:
+                logger.info(f"Successfully connected to backpack on port: {port}")
                 break
+            else:
+                logger.info(f"No backpack response from port: {port}")
+                connection.close()
 
         else:
+            logger.warning("Failed to find backpack on any available serial port")
             return False
 
         self._parsing_greenlet = gevent.spawn(self._parser)
